@@ -10,6 +10,7 @@ Version95 = 95
 TileCount = 314
 FrameWidth = 18
 
+INVALID_POINTER = -1
 SECTION_FLAGS = 0
 SECTION_TILES = 1
 SECTION_CHESTS = 2
@@ -33,6 +34,7 @@ class WorldFileHeader(object):
         self.MetaRevision = rev
         self.WorldBits = 0
         self.SectionPointers = [-1] * SectionCount
+        self.FileSize = 0
         self.ImportantTiles = []
 
     def AssertValid(self):
@@ -48,9 +50,12 @@ class WorldFileHeader(object):
     def GetNPCsPointer(self):
         return self.SectionPointers[SECTION_NPCS]
     def GetTileEntitiesPointer(self):
-        return self.SectionPointers[SECTION_TENTS]
+        if self.Version >= Version140:
+            return self.SectionPointers[SECTION_TENTS]
+        else:
+            return INVALID_POINTER
     def GetFooterPointer(self):
-        if self.Version >= VERSION_140:
+        if self.Version >= Version140:
             return self.SectionPointers[SECTION_FOOTER_140]
         else:
             return self.SectionPointers[SECTION_FOOTER_OLD]

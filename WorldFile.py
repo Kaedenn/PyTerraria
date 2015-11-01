@@ -6,6 +6,7 @@ import sys
 
 import Match
 
+import Header
 import IDs
 import World
 
@@ -64,7 +65,8 @@ Use --help-table for help on the tile table arguments.
 Use --help-match for help on the find argument.
 """, formatter_class=argparse.RawTextHelpFormatter)
     
-    HELP_TABLE = """
+    HELP_TABLE = """Using the tile table arguments:
+
 With just --tile-table, the output will be:
 TILES_World_1 = [ # All non-alnum characters are converted to _
     [(ID, Wall), (ID, Wall), ...], # First row of tiles in World 1
@@ -94,7 +96,8 @@ If --tile-table-expr is present, the output will be just an expression:
 ]
 """
 
-    HELP_FIND = """
+    HELP_FIND = """Using the find argument:
+
 The value passed via --find matches a set of numbers. The --find argument can
 be passed as many times as desired. The syntax is akin to the following
 grammar:
@@ -126,16 +129,22 @@ For example,
                    help="a world file path, world name, or world file name")
     p.add_argument("-w", "--world", default=None,
                    help="file name of world to load")
+    p.add_argument("-T", "--ignore-tiles", action="store_true",
+                   help="don't load tile data")
+    p.add_argument("-C", "--ignore-chests", action="store_true",
+                   help="don't load chests")
+    p.add_argument("-S", "--ignore-signs", action="store_true",
+                   help="don't load signs")
     p.add_argument("--headers", action="store_true",
                    help="display the world header flags")
+    p.add_argument("--pointers", action="store_true",
+                   help="display file offset pointers")
     p.add_argument("--kills", action="store_true",
                    help="display mob/banner kill counts")
     p.add_argument("--less-than-50", action="store_true",
                    help="display only mob/banner kill counts less than 50")
     p.add_argument("--sort-kills", choices=("banner", "count", "id", "mob"),
-                   default=None,
-                   help="sort kill counts by either banner id, kill count,"
-                        " mob ID, or mob name")
+                   default=None, help="sort kill counts by choice given")
     p.add_argument("--counts", action="store_true",
                    help="display tile counts")
     p.add_argument("--gem-counts", action="store_true",
@@ -148,12 +157,14 @@ For example,
                    help="print tile ID and frame coordinates (U,V)")
     p.add_argument("--tile-table-expr", action="store_true",
                    help="suppress assignment expr in the tile table")
-    p.add_argument("--ignore-tiles", action="store_true",
-                   help="do not load tile data")
     p.add_argument("-t", action="store_true",
-                   help="format kill counts as a table")
+                   help="format numerical outputs as tables")
     p.add_argument("--find", action="append",
                    help="print locations of t or t,u,v")
+    p.add_argument("--npcs", action="store_true",
+                   help="print all NPCs")
+    p.add_argument("--tents", action="store_true",
+                   help="print all tile entities")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="be more verbose")
     p.add_argument("-d", "--debug", action="store_true",
@@ -163,6 +174,13 @@ For example,
     p.add_argument("--help-find", action="store_true",
                    help="display help on the find argument")
     args = p.parse_args()
+
+    if args.help_table or args.help_find:
+        if args.help_table:
+            print(HELP_TABLE)
+        if args.help_find:
+            print(HELP_FIND)
+        raise SystemExit(0)
 
     if args.tile_table_ids or args.tile_table_uv and not args.tile_table:
         args.tile_table = True
@@ -180,13 +198,43 @@ For example,
         path = World.World.FindWorld(args.path)
 
     w = World.World(load_tiles=(not args.ignore_tiles),
+                    load_chests=(not args.ignore_chests),
+                    load_signs=(not args.ignore_signs),
                     verbose=args.verbose, debug=args.debug)
     w.Load(open(path, 'r'))
+
+    if args.pointers:
+        h = w.GetHeader()
+        flags = h.GetFlagsPointer()
+        tiles = h.GetTilesPointer()
+        chests = h.GetChestsPointer()
+        signs = h.GetSignsPointer()
+        npcs = h.GetNPCsPointer()
+        tents = h.GetTileEntitiesPointer()
+        footer = h.GetFooterPointer()
+        npcs_size = tents - npcs
+        if h.Version < Header.Version140:
+            npcs_size = footer - npcs
+        fmt = "%s: %d (%d bytes)"
+        if args.t:
+            print("%-13s %8s %s" % ("Section", "Offset", "Size (bytes)"))
+            fmt = "%-13s %8d %8d"
+        print(fmt % ("Flags", flags, tiles-flags))
+        print(fmt % ("Tiles", tiles, chests-tiles))
+        print(fmt % ("Chests", chests, signs-chests))
+        print(fmt % ("Signs", signs, npcs-signs))
+        print(fmt % ("NPCs", npcs, npcs_size))
+        if h.Version >= Header.Version140:
+            print(fmt % ("Tile Entities", tents, footer-tents))
+        print(fmt % ("Footer", footer, h.FileSize-footer))
 
     if args.headers:
         h = w.GetHeaderFlags()
         for k,v in h:
-            print("%s = %s" % (k, v))
+            if k.startswith('OreTier'):
+                print("%s = %d %s" % (k, v, IDs.TileID[int(v)]))
+            else:
+                print("%s = %s" % (k, v))
 
     if args.kills:
         fmt = "%d %d %s"
@@ -199,7 +247,7 @@ For example,
                 continue
             if bannerid < len(IDs.BannerToNPC):
                 npc = IDs.BannerToNPC[bannerid]
-                if npc in IDs.NPCID:
+                if npc in IDs.NPCID and npc != 0:
                     results.append((killcount, npc, IDs.NPCID[npc]))
                 elif npc != 0:
                     results.append((killcount, npc, "<id-not-enumerated>"))
@@ -220,15 +268,13 @@ For example,
 
     if args.gem_counts:
         results = []
-        for row in range(w.GetHeaderFlag("TilesHigh")):
-            for col in range(w.GetHeaderFlag("TilesWide")):
-                tile = w.GetTile(col, row)
-                if IDs.Tiles['Sapphire'] <= tile.Type <= IDs.Tiles['Diamond']:
-                    results.append((tile.Type, None))
-                elif tile.Type == IDs.Tiles['SmallPiles']:
-                    item = IDs.tile_to_item(tile.Type, tile.U, tile.V)
-                    if item != IDs.INVALID:
-                        results.append((tile.Type, item))
+        for row, col, tile in w.EachTile():
+            if IDs.Tiles['Sapphire'] <= tile.Type <= IDs.Tiles['Diamond']:
+                results.append((tile.Type, None))
+            elif tile.Type == IDs.Tiles['SmallPiles']:
+                item = IDs.tile_to_item(tile.Type, tile.U, tile.V)
+                if item != IDs.INVALID:
+                    results.append((tile.Type, item))
         counts = {}
         for t, i in results:
             if (t, i) not in counts:
@@ -255,7 +301,8 @@ For example,
         if args.tile_table_expr:
             print('[')
         else:
-            print("TILES_%s = [" % (_make_token_from(w.GetHeaderFlag("Title")),))
+            title = _make_token_from(w.GetHeaderFlag("Title"))
+            print("TILES_%s = [" % (title,))
         for row in range(w.GetHeaderFlag("TilesHigh")):
             tileRow = []
             for col in range(w.GetHeaderFlag("TilesWide")):
@@ -268,6 +315,14 @@ For example,
                     tileRow.append(tile.ToSimpleID())
             print("    %s," % (tileRow,))
         print("]")
+
+    if args.npcs:
+        for npc in w.GetNPCs():
+            print(npc)
+
+    if args.tents:
+        for tent in w.GetTileEntities():
+            print(tent)
 
 if __name__ == "__main__":
     _main()

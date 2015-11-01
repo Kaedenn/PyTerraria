@@ -11,6 +11,12 @@ class BrickStyles(object):
     SlopeBottomLeftUp = 5
     Unknown06 = 6
     Unknown07 = 7
+    @classmethod
+    def From(value):
+        values = [Full, HalfBrick, SlopeTopLeftDown, SlopeBottomLeftDown,
+                  SlopeTopLeftUp, SlopeBottomLeftUp, Unknown06, Unknown07]
+        if Full <= value <= Unknown07:
+            return values[value]
 
 class LiquidTypes(object):
     None_ = 0
