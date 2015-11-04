@@ -3,7 +3,7 @@
 """
 Binary Stream: reading files one byte at a time
 
-See help(__module__.BinaryStream) for an explanation on how the stream works.
+See help(__module__.BinaryString) for an explanation on how the stream works.
 
 Special data types not understood by the Python struct module:
 
@@ -72,8 +72,6 @@ def typestr(typeid):
 def _make_reader(t, scalar=True):
     typeid, nbytes = t
     def reader(self):
-        if self._paranoid:
-            assert struct.calcsize(typestr(typeid)) == nbytes
         bytevals = struct.unpack(typestr(typeid), self._next(nbytes))
         return bytevals[0] if scalar else bytevals
     reader.__doc__ = "Reads %d byte%s as a little-endian %s type" % (
@@ -83,13 +81,11 @@ def _make_reader(t, scalar=True):
 def _make_writer(t, scalar=True):
     typeid, nbytes = t
     def writer(self, data):
-        if self._paranoid:
-            assert struct.calcsize(typestr(typeid)) == nbytes
         bytevals = struct.pack(typestr(typeid), data)
         self.writeBytes(bytevals)
     return writer
 
-class BinaryStream(object):
+class BinaryString(object):
     """Planned features:
     1) Inherit class file and operate on a stream, not a str
     2) Implement symmetric writers
@@ -127,18 +123,15 @@ class BinaryStream(object):
 
     ScalarReaderLookup = dict(zip(Types, ScalarReaders))
 
-    def __init__(self, fobj, verbose=False, paranoid=False):
-        """Creates a BinaryStream instance.
+    def __init__(self, string, verbose=False):
+        """Creates a BinaryString instance.
         @param fobj - must be an object with a read() method (for the reading
                       methods)
-        @param verbose - output progress/debugging information (unused)
-        @param paranoid - assert data lengths and typeid sizes are the same
-                          on every read
+        @param verbose - output progress/debugging information
         """
-        self._content = fobj.read()
+        self._content = string
         self._pos = 0
         self._verbose_on = verbose
-        self._paranoid = paranoid
 
     def _verbose(self, string, *args, **kwargs):
         if self._verbose_on:
@@ -151,6 +144,9 @@ class BinaryStream(object):
 
     def _next(self, nbytes):
         result = self._content[self._pos:self._pos+nbytes]
+        if self._pos + nbytes > len(self._content):
+            eofbytes = self._pos + nbytes - len(self._content)
+            raise EOFError("Attempt to read %d bytes beyond EOF" % (eofbytes,))
         self._pos += nbytes
         if len(result) == 0:
             print("Read of %d bytes yields no data: %r" % (nbytes, result))
@@ -169,14 +165,17 @@ class BinaryStream(object):
     def seek(self, nbytes):
         "Seek relative to the current position by @param nbytes"
         self._pos += nbytes
+        self._clamp_pos()
 
     def seek_set(self, pos):
         "Seek to the absolute offset given by @param pos"
         self._pos = pos
+        self._clamp_pos()
 
     def seek_end(self, nbytes = 0):
         "Seek to @param nbytes before the end of the stream (default: 0)"
         self._pos = len(self._content) - nbytes
+        self._clamp_pos()
 
     def get_pos(self):
         "Returns the current position in the stream"
@@ -223,4 +222,5 @@ class BinaryStream(object):
         self._content = "".join(l, data, r)
         self._pos += len(data)
 
-ScalarReaderLookup = BinaryStream.ScalarReaderLookup
+ScalarReaderLookup = BinaryString.ScalarReaderLookup
+

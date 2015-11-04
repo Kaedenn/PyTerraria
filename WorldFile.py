@@ -16,6 +16,8 @@ if True:
     World = reload(World)
     w = World.World()
     w.Load(open("/home/kaedenn/.local/share/Terraria/Worlds/World_1.wld"))
+
+Tiles are accessible if they're between x=40 and x=8357
 """
 
 def _make_token_from(title):
@@ -201,7 +203,7 @@ For example,
                     load_chests=(not args.ignore_chests),
                     load_signs=(not args.ignore_signs),
                     verbose=args.verbose, debug=args.debug)
-    w.Load(open(path, 'r'))
+    w.Load(open(path, 'r').read())
 
     if args.pointers:
         h = w.GetHeader()

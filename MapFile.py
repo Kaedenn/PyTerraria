@@ -3,7 +3,7 @@
 import os
 import sys
 import FileMetadata
-from BinaryStream import BinaryStream
+from BinaryString import BinaryString
 
 FILE_MAGIC = FileMetadata.FILE_MAGIC
 FILE_MAGIC_MAP = FileMetadata.FILE_MAGIC_MAP
@@ -57,7 +57,7 @@ class Map(object):
                 sys.stderr.write("%s\n" % (arg,))
 
     def Load(self, fobj):
-        self._stream = BinaryStream(fobj, verbose=self._is_verbose)
+        self._stream = BinaryString(fobj, verbose=self._is_verbose)
         self._header = FileHeader(verbose=self._is_verbose)
         self._numTileOpts = -1
         self._tileOptMap = None
