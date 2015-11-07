@@ -3,26 +3,43 @@
 import os
 import struct
 
+# NOTE: If any more tables are added (or pseduo-enumeration objects),
+# do not forget to add them to __all__!
+
+"""
+TerrariaIDs <-> Names lookup module
+
+To automagically close all of the ID definitions, use the following:
+%g/^[^ ].*[{(\[]$/norm zf%/
+
+To execute the above, place the cursor on the line and type:
+yy:^R"
+
+That's yank the current line to the anonymous register, then start an ed
+command, and then insert the contents of the unnamed register (denoted ")
+See :help c_^r
+
+"""
+
 INVALID = -1
+FRAME_WIDTH = 18
 
-def ParseByteArray(string):
-    """Parsing a string of two hex digits separated by spaces.
-    Use this to parse strings like "12 00 00 00 21 00 00 00\n18 13 00 00" into
-    an array of numbers.
-    """
-    s = "".join(chr(int(i, 16)) for i in ' '.join(string.splitlines()).split())
-    return struct.unpack('<' + 'i'*(len(s)/4), s)
-
-def SwapKeysAndValues(d):
-    result = dict((v,k) for k,v in d.items())
+def _SwapKeysAndValues(d):
+    result = dict((v,k) for k,v in d.iteritems())
     if len(result) != len(d):
         raise ValueError("lost %d items in conversion!" % (len(d) - len(result),))
     return result
 
-def MakeIDNameLookup(d):
-    return SwapKeysAndValues(d), d
+def _MakeIDNameLookup(d):
+    return _SwapKeysAndValues(d), d
 
-FRAME_WIDTH = 18
+def _MakeNamesClass(table):
+    class Lookup(object):
+        def __init__(self, t):
+            self._table = t
+        def __getattr__(self, attr):
+            return self._table[attr]
+    return Lookup(table)
 
 Frames = {
     'ExposedGems': {
@@ -160,12 +177,12 @@ Prefixes = {
     83: "Mythical"
 }   # Prefixes
 
-AnimationID = SwapKeysAndValues({
+AnimationID = _SwapKeysAndValues({
     "MushroomStatueTurningOn": 0,
     "MushroomStatueTurningOff": 1,
 })  # AnimationID
 
-BuffID, Buffs = MakeIDNameLookup({
+BuffID, Buffs = _MakeIDNameLookup({
     "ObsidianSkin": 1,
     "Regeneration": 2,
     "Swiftness": 3,
@@ -358,7 +375,7 @@ BuffID, Buffs = MakeIDNameLookup({
     "Count": 191,
 })  # BuffID, Buffs
 
-ChainID = SwapKeysAndValues({
+ChainID = _SwapKeysAndValues({
     "TendonHook": 0,
     "ThornHook": 1,
     "IlluminantHook": 2,
@@ -378,7 +395,7 @@ ChainID = SwapKeysAndValues({
     "Count": 16,
 })  # ChainID
 
-DustID = SwapKeysAndValues({
+DustID = _SwapKeysAndValues({
     "Dirt": 0,
     "Stone": 1,
     "Grass": 2,
@@ -436,7 +453,7 @@ DustID = SwapKeysAndValues({
     "Count": 268,
 })  # DustID
 
-ExtrasID = SwapKeysAndValues({
+ExtrasID = _SwapKeysAndValues({
     "BrainScrambler": 0,
     "Raygun": 1,
     "LaserRuler": 2,
@@ -509,7 +526,7 @@ ExtrasID = SwapKeysAndValues({
     "Count": 69,
 })  # ExtrasID
 
-GlowMaskID = SwapKeysAndValues({
+GlowMaskID = _SwapKeysAndValues({
     "None": 65535,
     "UFOMinion": 0,
     "VortexAxe": 1,
@@ -728,7 +745,7 @@ GlowMaskID = SwapKeysAndValues({
     "Count": 214,
 })  # GlowMaskID
 
-GoreID = SwapKeysAndValues({
+GoreID = _SwapKeysAndValues({
     "ChargedBlasterRing": 618,
     "MoonLordHeart1": 619,
     "MoonLordHeart2": 620,
@@ -997,7 +1014,7 @@ GoreID = SwapKeysAndValues({
     "Count": 907,
 })  # GoreID
 
-InvasionID = SwapKeysAndValues({
+InvasionID = _SwapKeysAndValues({
     "None": 0,
     "GoblinArmy": 1,
     "SnowLegion": 2,
@@ -1006,7 +1023,7 @@ InvasionID = SwapKeysAndValues({
     "Count": 5,
 })  # InvasionID
 
-ItemID, Items = MakeIDNameLookup({
+ItemID, Items = _MakeIDNameLookup({
     "None": 0,
     "IronPickaxe": 1,
     "DirtBlock": 2,
@@ -4618,7 +4635,9 @@ ItemID, Items = MakeIDNameLookup({
     "BluePhasesaber": 65517,
 })  # ItemID, Items
 
-MessageID = SwapKeysAndValues({
+Item = _MakeNamesClass(Items)
+
+MessageID = _SwapKeysAndValues({
     "NeverCalled": 0,
     "Unknown1": 1,
     "Unknown2": 2,
@@ -4727,7 +4746,7 @@ MessageID = SwapKeysAndValues({
     "Count": 105,
 })  # MessageID
 
-NPCID, NPCs = MakeIDNameLookup({
+NPCID, NPCs = _MakeIDNameLookup({
     "Slimeling": -1,
     "Slimer": -2,
     "Green Slime": -3,
@@ -5346,7 +5365,7 @@ NPCID, NPCs = MakeIDNameLookup({
     "Count": 540,
 })  # NPCID
 
-PlayerVariantID = SwapKeysAndValues({
+PlayerVariantID = _SwapKeysAndValues({
     "MaleStarter": 0,
     "MaleSticker": 1,
     "MaleGangster": 2,
@@ -5358,7 +5377,7 @@ PlayerVariantID = SwapKeysAndValues({
     "Count": 8,
 })  # PlayerVariantID
 
-PlayerTextureID = SwapKeysAndValues({
+PlayerTextureID = _SwapKeysAndValues({
     "Head": 0,
     "EyeWhites": 1,
     "Eyes": 2,
@@ -5377,7 +5396,7 @@ PlayerTextureID = SwapKeysAndValues({
     "Count": 15,
 })  # PlayerTextureID
 
-ProjectileID, Projectiles = MakeIDNameLookup({
+ProjectileID, Projectiles = _MakeIDNameLookup({
     "None": 0,
     "WoodenArrowFriendly": 1,
     "FireArrow": 2,
@@ -6032,7 +6051,7 @@ ProjectileID, Projectiles = MakeIDNameLookup({
     "Count": 651,
 })  # ProjectileID, Projectiles
 
-StatusID = SwapKeysAndValues({
+StatusID = _SwapKeysAndValues({
     "Ok": 0,
     "LaterVersion": 1,
     "UnknownError": 2,
@@ -6042,7 +6061,7 @@ StatusID = SwapKeysAndValues({
     "BadFooter": 6,
 })  # StatusID
 
-TileID, Tiles = MakeIDNameLookup({
+TileID, Tiles = _MakeIDNameLookup({
     "Dirt": 0,
     "Stone": 1,
     "Grass": 2,
@@ -6465,7 +6484,9 @@ TileID, Tiles = MakeIDNameLookup({
     "Count": 419,
 })  # TileID, Tiles
 
-WallID, Walls = MakeIDNameLookup({
+Tile = _MakeNamesClass(Tiles)
+
+WallID, Walls = _MakeIDNameLookup({
     "None": 0,
     "Stone": 1,
     "DirtUnsafe": 2,
@@ -7436,11 +7457,7 @@ def tile_to_item(tile, u, v, noexcept=False):
 
 def strtoint(string, base):
     if base is None:
-        if string.startswith('0x'):
-            return int(string, 16)
-        if string.startswith('0'):
-            return int(string, 8)
-        return int(string)
+        return int(string, base=0)
     return int(string, base)
 
 def main_normal(Tables, args):
@@ -7563,3 +7580,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# NOTE: If any more tables are added (or pseduo-enumeration objects),
+# do not forget to add them to __all__!
+__all__ = ['AnimationID', 'BannerToNPC', 'BuffID', 'Buffs', 'ChainID',
+           'DustID', 'ExtrasID', 'FRAME_WIDTH', 'Frames', 'GlowMaskID',
+           'GoreID', 'INVALID', 'InvasionID', 'Item', 'ItemID', 'Items',
+           'MessageID', 'NPCID', 'NPCToBanner', 'NPCs', 'PlayerTextureID',
+           'PlayerVariantID', 'Prefixes', 'ProjectileID', 'Projectiles',
+           'Sets', 'StatusID', 'Tile', 'TileID', 'Tiles', 'WallID', 'Walls',
+           'tile_to_item', 'INVALID', 'FRAME_WIDTH']
+
