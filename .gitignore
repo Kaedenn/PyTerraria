@@ -55,3 +55,11 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# VIM stuff:
+*.swp
+
+# Other stuff:
+Worlds/
+References/
+Broken/
