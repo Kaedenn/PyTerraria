@@ -37,6 +37,7 @@ Extended Pascal string: input: a python string
     encodings like UTF-16 will have larger sizes than UTF-8 or ASCII.
 """
 
+import os
 import struct
 
 BooleanType = ('?', 1)
@@ -71,8 +72,9 @@ def typestr(typeid):
 
 def _make_reader(t, scalar=True):
     typeid, nbytes = t
+    ts = typestr(typeid)
     def reader(self):
-        bytevals = struct.unpack(typestr(typeid), self._next(nbytes))
+        bytevals = struct.unpack(ts, self._next(nbytes))
         return bytevals[0] if scalar else bytevals
     reader.__doc__ = "Reads %d byte%s as a little-endian %s type" % (
             nbytes, "" if nbytes == 1 else "s", TypeNames[t])
@@ -80,9 +82,12 @@ def _make_reader(t, scalar=True):
 
 def _make_writer(t, scalar=True):
     typeid, nbytes = t
+    ts = typestr(typeid)
     def writer(self, data):
-        bytevals = struct.pack(typestr(typeid), data)
-        self.writeBytes(bytevals)
+        bytevals = struct.pack(ts, data)
+        self.write(bytevals[0] if scalar else bytevals)
+    writer.__doc__ = "Writes %d byte%s as a little-endian %s type" % (
+            nbytes, "" if nbytes == 1 else "s", TypeNames[t])
     return writer
 
 class BinaryString(object):
@@ -123,15 +128,30 @@ class BinaryString(object):
 
     ScalarReaderLookup = dict(zip(Types, ScalarReaders))
 
-    def __init__(self, string, verbose=False):
+    def __init__(self, data, verbose=False, debug=False):
         """Creates a BinaryString instance.
-        @param fobj - must be an object with a read() method (for the reading
-                      methods)
-        @param verbose - output progress/debugging information
+        Parameters:
+          string - a string-like buffer supporting subscript and slicing
+          verbose - output progress/debugging information (default=False)
         """
-        self._content = string
+        if hasattr(data, 'read'):
+            self._content = data.read()
+        elif isinstance(data, basestring):
+            self._content = data
+        else:
+            # TODO: warn?
+            self._content = data
         self._pos = 0
         self._verbose_on = verbose
+        self._debug_on = debug
+        self._debug_counts = {}
+
+    def _debug_tally(self, nbytes):
+        if self._debug_on:
+            if nbytes not in self._debug_counts:
+                self._debug_counts[nbytes] = 1
+            else:
+                self._debug_counts[nbytes] += 1
 
     def _verbose(self, string, *args, **kwargs):
         if self._verbose_on:
@@ -144,15 +164,19 @@ class BinaryString(object):
 
     def _next(self, nbytes):
         result = self._content[self._pos:self._pos+nbytes]
-        if self._pos + nbytes > len(self._content):
-            eofbytes = self._pos + nbytes - len(self._content)
-            raise EOFError("Attempt to read %d bytes beyond EOF" % (eofbytes,))
         self._pos += nbytes
-        if len(result) == 0:
-            print("Read of %d bytes yields no data: %r" % (nbytes, result))
-            print("Offset (pre-read) %s, post-read %s" % (self._pos-nbytes, self._pos))
+        if self._pos > len(self._content):
+            nb = self._pos - len(self._content)
+            raise EOFError("Attempt to read %d bytes beyond EOF" % (nb,))
+        if self._debug_on and not result:
+            off_pr, off_po = self._pos-nbytes, self._pos
+            print("Read of %d bytes yields no data" % (nbytes,))
+            print("Offset pre-read %s, post-read %s" % (off_pr, off_po))
             print("Length of stream: %s" % (len(self._content),))
-        return result if nbytes > 1 else result[0]
+        self._debug_tally(nbytes)
+        if nbytes == 1:
+            return result[0]
+        return result
 
     def _clamp_pos(self):
         if self._pos < 0:
@@ -162,29 +186,51 @@ class BinaryString(object):
             self._verbose("Position %d beyond EOF; clamping" % (self._pos))
             self._pos = len(self._content)
 
-    def seek(self, nbytes):
-        "Seek relative to the current position by @param nbytes"
-        self._pos += nbytes
+    def getReadStats(self):
+        return self._debug_counts
+
+    def seek(self, nbytes, whence=os.SEEK_CUR):
+        "Seek relative to the current position by nbytes"
+        if whence == os.SEEK_CUR:
+            self._pos += nbytes
+        elif whence == os.SEEK_SET:
+            self._pos = nbytes
+        elif whence == os.SEEK_END:
+            self._pos = len(self._content) + nbytes
         self._clamp_pos()
+
+    def seek_cur(self, nbytes):
+        "Seek relative to the current position by nbytes"
+        return self.seek(nbytes, whence=os.SEEK_CUR)
 
     def seek_set(self, pos):
-        "Seek to the absolute offset given by @param pos"
-        self._pos = pos
-        self._clamp_pos()
+        "Seek to the absolute offset given by pos"
+        return self.seek(pos, whence=os.SEEK_SET)
 
-    def seek_end(self, nbytes = 0):
-        "Seek to @param nbytes before the end of the stream (default: 0)"
-        self._pos = len(self._content) - nbytes
-        self._clamp_pos()
+    def seek_end(self, nbytes=0):
+        "Seek to nbytes (usually negative) after stream end"
+        return self.seek(nbytes, whence=os.SEEK_END)
+
+    def tell(self):
+        "Returns the current position in the stream"
+        return self.get_pos()
 
     def get_pos(self):
         "Returns the current position in the stream"
         return self._pos
 
-    def readString(self):
+    def getContent(self, remainder=False):
+        "Get the reader's underlying buffer, optionally starting at self._pos"
+        if remainder:
+            return self._content[self._pos:]
+        return self._content, self._pos
+
+    def readString(self, length=None):
         """Reads an extended Pascal string.
+        Reads the length as a 7-bit packed integer if length is None.
         See module docstring for an explanation on extended Pascal strings"""
-        length = self.readPacked7Int()
+        if length is None:
+            length = self.readPacked7Int()
         return self._next(length) if length > 0 else ''
     
     def readPacked7Int(self):
@@ -201,8 +247,8 @@ class BinaryString(object):
 
     def readBitArray(self, nbits=None):
         """Reads a packed bit array.
-        Reads the first 16 bits as the length of the array beforehand if
-        @param nbits is omitted (or None)"""
+        Reads the first 16 bits as the length of the array beforehand if nbits
+        is omitted (or None)"""
         if nbits is None:
             nbits = self.readInt16()
         bits = []

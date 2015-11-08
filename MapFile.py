@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
 import os
+import struct
 import sys
+import zlib
 import FileMetadata
 from BinaryString import BinaryString
 
@@ -57,7 +59,7 @@ class Map(object):
                 sys.stderr.write("%s\n" % (arg,))
 
     def Load(self, fobj):
-        self._stream = BinaryString(fobj, verbose=self._is_verbose)
+        self._stream = BinaryString(fobj.read(), verbose=self._is_verbose)
         self._header = FileHeader(verbose=self._is_verbose)
         self._numTileOpts = -1
         self._tileOptMap = None
@@ -86,6 +88,7 @@ class Map(object):
         self._worldID = self._stream.readInt32()
         self._maxTilesY = self._stream.readInt32()
         self._maxTilesX = self._stream.readInt32()
+        self.verbose("World size: %d rows by %d columns" % (self._maxTilesY, self._maxTilesX))
         self._numTileOpts = self._stream.readInt16()
         self.verbose("numTileOpts = %d" % (self._numTileOpts,))
         assert_eq(self._numTileOpts, 419)
@@ -100,9 +103,9 @@ class Map(object):
         assert_eq(self._unknown255_2, 256)
         self._unknown255_3 = self._stream.readInt16()
         assert_eq(self._unknown255_3, 256)
-        self._tileOptMap = self._stream.readBitArrayOfSize(self._numTileOpts)
+        self._tileOptMap = self._stream.readBitArray(self._numTileOpts)
         self.verbose("read tile opt map")
-        self._wallOptMap = self._stream.readBitArrayOfSize(self._numWallOpts)
+        self._wallOptMap = self._stream.readBitArray(self._numWallOpts)
         self.verbose("read wall opt map")
 
     def LoadOpts(self):
@@ -127,22 +130,28 @@ class Map(object):
         self.verbose("Total tile types: %s" % (len(self._tileTypes),))
 
     def LoadWorld(self, width, height):
-        for y in range(height):
-            for x in range(width):
-                header1 = self._stream.readByte()
-                header2 = 0 if (header1 & 1) == 0 else self._stream.readByte()
+        self.verbose("Offset: %s" % (self._stream.get_pos(),))
+        data = zlib.decompress(self._stream.getContent(remainder=True), -15)
+        stream = BinaryString(data)
+        x, y = 0, 0
+        while y < height:
+            while x < width:
+                header1 = stream.readByte()
+                header2 = 0 if (header1 & 1) == 0 else stream.readByte()
                 mask14 = (header1 & 14) >> 3
                 flag14 = (mask14 in (1, 2, 7))
                 tileIdx = 0
                 if (header1 & 16) != 16:
-                    tileIdx = self._stream.readByte()
+                    tileIdx = stream.readByte()
                 else:
-                    tileIdx = self._stream.readUInt16()
+                    tileIdx = stream.readUInt16()
                 tileLight = 0
                 if (header1 & 32) != 32:
                     light = 255
                 else:
-                    light = self._stream.readByte()
+                    light = stream.readByte()
+                x += 1
+            y += 1
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

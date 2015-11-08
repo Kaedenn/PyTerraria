@@ -7591,3 +7591,4 @@ __all__ = ['AnimationID', 'BannerToNPC', 'BuffID', 'Buffs', 'ChainID',
            'Sets', 'StatusID', 'Tile', 'TileID', 'Tiles', 'WallID', 'Walls',
            'tile_to_item', 'INVALID', 'FRAME_WIDTH']
 
+

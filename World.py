@@ -2,14 +2,17 @@
 
 import os
 import sys
+import warnings
 
 import Header
 from Header import CompatibleVersion, Version147, Version140, Version104, \
                    Version101, Version99, Version95
+from WorldFlags import WorldFlags
 import BinaryString
 import IDs
 import Tile
 import Chest
+import Entity
 
 VERBOSE_MODE = False
 
@@ -21,9 +24,8 @@ def verbose(string, *args):
             sys.stderr.write(string)
         sys.stderr.write("\n")
 
-def warn(string):
-    import warnings
-    warnings.warn(string)
+def warn(string, *args):
+    warnings.warn(string % args if args else string)
 
 def test_bit(value, bit):
     return (value & bit) == bit
@@ -63,142 +65,12 @@ BIT_HASRLE1 = 0b01000000 # Header 1: 64
 # Is this RLE of type 2? (16bit RLE)
 BIT_HASRLE2 = 0b10000000 # Header 1: 128
 
-class WorldFlags(object):
-    Flags = (
-        ("WorldId", BinaryString.UInt32Type, CompatibleVersion),
-        ("LeftWorld", BinaryString.UInt32Type, CompatibleVersion),
-        ("RightWorld", BinaryString.UInt32Type, CompatibleVersion),
-        ("TopWorld", BinaryString.UInt32Type, CompatibleVersion),
-        ("BottomWorld", BinaryString.UInt32Type, CompatibleVersion),
-        ("TilesHigh", BinaryString.UInt32Type, CompatibleVersion),
-        ("TilesWide", BinaryString.UInt32Type, CompatibleVersion),
-        ("ExpertMode", BinaryString.BooleanType, Version147),
-        ("CreationTime", BinaryString.UInt64Type, Version147),
-        ("MoonType", BinaryString.SInt8Type, CompatibleVersion),
-        ("TreeX0", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeX1", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeX2", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeStyle0", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeStyle1", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeStyle2", BinaryString.UInt32Type, CompatibleVersion),
-        ("TreeStyle3", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackX0", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackX1", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackX2", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackStyle0", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackStyle1", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackStyle2", BinaryString.UInt32Type, CompatibleVersion),
-        ("CaveBackStyle3", BinaryString.UInt32Type, CompatibleVersion),
-        ("IceBackStyle", BinaryString.UInt32Type, CompatibleVersion),
-        ("JungleBackStyle", BinaryString.UInt32Type, CompatibleVersion),
-        ("HellBackStyle", BinaryString.UInt32Type, CompatibleVersion),
-        ("SpawnX", BinaryString.UInt32Type, CompatibleVersion),
-        ("SpawnY", BinaryString.UInt32Type, CompatibleVersion),
-        ("GroundLevel", BinaryString.DoubleType, CompatibleVersion),
-        ("RockLevel", BinaryString.DoubleType, CompatibleVersion),
-        ("Time", BinaryString.DoubleType, CompatibleVersion),
-        ("DayTime", BinaryString.BooleanType, CompatibleVersion),
-        ("MoonPhase", BinaryString.UInt32Type, CompatibleVersion),
-        ("BloodMoon", BinaryString.BooleanType, CompatibleVersion),
-        ("IsEclipse", BinaryString.BooleanType, CompatibleVersion),
-        ("DungeonX", BinaryString.UInt32Type, CompatibleVersion),
-        ("DungeonY", BinaryString.UInt32Type, CompatibleVersion),
-        ("IsCrimson", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedBoss1", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedBoss2", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedBoss3", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedQueenBee", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedMechBoss1", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedMechBoss2", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedMechBoss3", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedMechBossAny", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedPlantBoss", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedGolemBoss", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedSlimeKingBoss", BinaryString.BooleanType, Version147),
-        ("SavedGoblin", BinaryString.BooleanType, CompatibleVersion),
-        ("SavedWizard", BinaryString.BooleanType, CompatibleVersion),
-        ("SavedMech", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedGoblins", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedClown", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedFrost", BinaryString.BooleanType, CompatibleVersion),
-        ("DownedPirates", BinaryString.BooleanType, CompatibleVersion),
-        ("ShadowOrbSmashed", BinaryString.BooleanType, CompatibleVersion),
-        ("SpawnMeteor", BinaryString.BooleanType, CompatibleVersion),
-        ("ShadowOrbCount", BinaryString.SInt8Type, CompatibleVersion),
-        ("AltarCount", BinaryString.UInt32Type, CompatibleVersion),
-        ("HardMode", BinaryString.BooleanType, CompatibleVersion),
-        ("InvasionDelay", BinaryString.UInt32Type, CompatibleVersion),
-        ("InvasionSize", BinaryString.UInt32Type, CompatibleVersion),
-        ("InvasionType", BinaryString.UInt32Type, CompatibleVersion),
-        ("InvasionX", BinaryString.DoubleType, CompatibleVersion),
-        ("SlimeRainTime", BinaryString.DoubleType, Version147),
-        ("SundialCooldown", BinaryString.SInt8Type, Version147),
-        ("TempRaining", BinaryString.BooleanType, CompatibleVersion),
-        ("TempRainTime", BinaryString.UInt32Type, CompatibleVersion),
-        ("TempMaxRain", BinaryString.SingleType, CompatibleVersion),
-        ("OreTier1", BinaryString.UInt32Type, CompatibleVersion),
-        ("OreTier2", BinaryString.UInt32Type, CompatibleVersion),
-        ("OreTier3", BinaryString.UInt32Type, CompatibleVersion),
-        ("BGTree", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGCorruption", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGJungle", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGSnow", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGHallow", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGCrimson", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGDesert", BinaryString.SInt8Type, CompatibleVersion),
-        ("BGOcean", BinaryString.SInt8Type, CompatibleVersion),
-        ("CloudBGActive", BinaryString.UInt32Type, CompatibleVersion),
-        ("NumClouds", BinaryString.UInt16Type, CompatibleVersion),
-        ("WindSpeedSet", BinaryString.SingleType, CompatibleVersion),
-        ("NumAnglers", BinaryString.UInt32Type, Version95),
-        ("Anglers", None, Version95), # requires manual parsing
-        ("SavedAngler", BinaryString.BooleanType, Version99),
-        ("AnglerQuest", BinaryString.UInt32Type, Version101),
-        ("SavedStylist", BinaryString.BooleanType, Version104),
-        ("SavedTaxCollector", BinaryString.BooleanType, Version140),
-        ("InvasionSizeStart", BinaryString.UInt32Type, Version140),
-        ("CultistDelay", BinaryString.UInt32Type, Version140),
-        ("KilledMobCount", BinaryString.UInt16Type, Version140),
-        ("KilledMobs", None, Version140), # requires manual parsing
-        ("FastForwardTime", BinaryString.BooleanType, Version140),
-        ("DownedFishron", BinaryString.BooleanType, Version140),
-        ("DownedMartians", BinaryString.BooleanType, Version140),
-        ("DownedLunaticCultist", BinaryString.BooleanType, Version140),
-        ("DownedMoonlord", BinaryString.BooleanType, Version140),
-        ("DownedHalloweenKing", BinaryString.BooleanType, Version140),
-        ("DownedHalloweenTree", BinaryString.BooleanType, Version140),
-        ("DownedChristmasQueen", BinaryString.BooleanType, Version140),
-        ("DownedSanta", BinaryString.BooleanType, Version140),
-        ("DownedChristmasTree", BinaryString.BooleanType, Version140),
-        ("DownedCelestialColar", BinaryString.BooleanType, Version140),
-        ("DownedCelestialVortex", BinaryString.BooleanType, Version140),
-        ("DownedCelestialNebula", BinaryString.BooleanType, Version140),
-        ("DownedCelestialStardust", BinaryString.BooleanType, Version140),
-        ("CelestialSolarActive", BinaryString.BooleanType, Version140),
-        ("CelestialVortexActive", BinaryString.BooleanType, Version140),
-        ("CelestialNebulaActive", BinaryString.BooleanType, Version140),
-        ("CelestialStardustActive", BinaryString.BooleanType, Version140),
-        ("Apocalypse", BinaryString.BooleanType, Version140),
-        ("UnknownFlags", None, CompatibleVersion) # future proofing, and
-                                                  # requires manual parsing
-    )
-    def __init__(self, version):
-        self.Title = ''      # ILString
-        for flag in WorldFlags.Flags:
-            setattr(self, flag[0], 0 if flag[1] is not None else [])
-
-    def setFlag(self, flag, value):
-        setattr(self, flag, value)
-
-    def getFlag(self, flag):
-        return getattr(self, flag)
-
 class World(object):
     def _PosToIdx(self, x, y):
-        return y * self._extents[0] + x
+        return y * self._width + x
 
     def _IdxToPos(self, idx):
-        return (idx % self._extents[0], int(idx / self._extents[0]))
+        return (idx % self._width, int(idx / self._width))
 
     def _ensure_offset(self, offset, or_fatal=False):
         if or_fatal and self._stream.get_pos() != offset:
@@ -210,6 +82,8 @@ class World(object):
                  load_tiles=True,
                  load_chests=True,
                  load_signs=True,
+                 load_npcs=True,
+                 load_tents=True,
                  verbose=False, debug=False):
         global VERBOSE_MODE
         self._extents = None
@@ -219,12 +93,16 @@ class World(object):
         self._chests = None
         self._signs = None
         self._npcs = None
+        self._width, self._height = 0, 0
+        self._extents = [0, 0]
 
         VERBOSE_MODE = VERBOSE_MODE or verbose or debug
         self._debug_enabled = debug
         self._should_load_tiles = load_tiles
         self._should_load_chests = load_chests
         self._should_load_signs = load_signs
+        self._should_load_npcs = load_npcs
+        self._should_load_tents = load_tents
         self._start_debug_frame()
         if fname is not None and fobj is not None:
             raise ValueError("fname and fobj are mutually exclusive")
@@ -242,7 +120,7 @@ class World(object):
             sys.stderr.write("\n")
 
     def Open(self, fobj):
-        self._stream = BinaryString.BinaryString(fobj)
+        self._stream = BinaryString.BinaryString(fobj.read(), debug=self._debug_enabled)
 
     def _start_debug_frame(self):
         self._debugging = []
@@ -263,9 +141,9 @@ class World(object):
                 if f.endswith('.wld'):
                     w = World()
                     w.Open(open(fp, 'r'))
-                    w.LoadSectionHeader()
-                    w.LoadHeaderFlags()
-                    worlds.append((f, w.GetHeaderFlag('Title'), fp))
+                    w.LoadFileHeader()
+                    w.LoadWorldFlags()
+                    worlds.append((f, w.GetWorldFlag('Title'), fp))
         return worlds
 
     @staticmethod
@@ -281,9 +159,9 @@ class World(object):
 
     def Load(self, fobj=None):
         if fobj is not None:
-            self._stream = BinaryString.BinaryString(fobj)
+            self._stream = BinaryString.BinaryString(fobj.read(), debug=self._debug_enabled)
         # Populate self._header
-        self.LoadSectionHeader()
+        self.LoadFileHeader()
 
         offsets = self._header.SectionPointers
         verbose("Header size: %s" % (offsets[1] - offsets[0],))
@@ -293,8 +171,10 @@ class World(object):
 
         assert self._pos() == self._header.GetFlagsPointer()
         # Populate self._flags
-        self.LoadHeaderFlags()
+        self.LoadWorldFlags()
         assert self._pos() == self._header.GetTilesPointer()
+        self._width = self._flags.TilesWide
+        self._height = self._flags.TilesHigh
         self._extents = [self._flags.TilesWide, self._flags.TilesHigh]
         if self._should_load_tiles:
             # Populate self._tiles
@@ -303,12 +183,12 @@ class World(object):
         else:
             self._stream.seek_set(self._header.GetChestsPointer())
         if self._should_load_chests:
-            self.LoadAllChests()
+            self.LoadChests()
             assert self._pos() == self._header.GetSignsPointer()
         else:
             self._stream.seek_set(self._header.GetSignsPointer())
         if self._should_load_signs:
-            self.LoadAllSigns()
+            self.LoadSigns()
             assert self._pos() == self._header.GetNPCsPointer()
         else:
             self._stream.seek_set(self._header.GetNPCsPointer())
@@ -319,7 +199,14 @@ class World(object):
         assert self._pos() == self._header.GetFooterPointer()
         self.LoadFooter()
 
-    def LoadSectionHeader(self, stream=None):
+        if self._debug_enabled:
+            stats = self._stream.getReadStats().items()
+            stats.sort()
+            print("Read statistics (size, number of times read):")
+            for nbytes, ntimes in stats:
+                print("%d\t%d" % (nbytes, ntimes))
+
+    def LoadFileHeader(self, stream=None):
         if stream is None:
             stream = self._stream
         header = Header.WorldFileHeader()
@@ -338,7 +225,7 @@ class World(object):
         header.ImportantTiles = stream.readBitArray()
         self._header = header
 
-    def LoadHeaderFlags(self, stream=None):
+    def LoadWorldFlags(self, stream=None):
         if stream is None:
             stream = self._stream
         if self._header is None or not self._header.Version:
@@ -392,9 +279,9 @@ class World(object):
     def _LoadUnknownHeaders(self):
         nflags = self._header.SectionPointers[1] - self._pos()
         if nflags == 0:
-            verbose("No flags present")
+            verbose("No unknown header flags present")
         else:
-            verbose("%d flag(s) present" % (nflags,))
+            verbose("%d unknown header flag(s) present" % (nflags,))
         flags = []
         for i in range(nflags):
             flags.append(self._stream.readUInt8())
@@ -414,7 +301,7 @@ class World(object):
         while x < width and self._pos() < endPos:
             y = 0
             while y < height and self._pos() < endPos:
-                tile, rle = self._LoadOneTile()
+                tile, rle = Tile.FromStream(self._stream, self._header.ImportantTiles)
                 nloaded += 1
                 nprocessed += 1
                 tiles[self._PosToIdx(x, y)] = tile
@@ -438,77 +325,7 @@ class World(object):
         verbose("Actually processed %d tiles" % (nprocessed,))
         self._tiles = tiles
 
-    def _LoadOneTile(self):
-        tile = Tile.Tile()
-        rle = 0
-        header1 = self._stream.readUInt8()
-        header2 = 0
-        header3 = 0
-        if test_bit(header1, BIT_MOREHDR):
-            header2 = self._stream.readUInt8()
-        if test_bit(header2, BIT_MOREHDR):
-            header3 = self._stream.readUInt8()
-        if test_bit(header3, BIT_MOREHDR):
-            print(bin(header1), bin(header2), bin(header3))
-            raise NotImplementedError("Tile with more than two headers not" +
-                                      " supported!")
-
-        self._add_debug("Loading tile headers %d %d %d", header1, header2,
-                        header3)
-        # process header1
-        if test_bit(header1, BIT_ACTIVE):
-            tile.IsActive = True
-            if test_bit(header1, BIT_TYPE16B):
-                tile.Type = self._stream.readUInt16()
-            else:
-                tile.Type = self._stream.readUInt8();
-            if self._header.ImportantTiles[tile.Type]:
-                tile.U = self._stream.readInt16()
-                tile.V = self._stream.readInt16()
-                if tile.Type == Tile.TileTypes.Timer:
-                    tile.V = 0
-            else:
-                tile.U = -1
-                tile.V = -1
-            if test_bit(header3, BIT_TCOLOR):
-                tile.TileColor = self._stream.readUInt8()
-        if test_bit(header1, BIT_HASWALL): # bit[2] = 4
-            tile.Wall = self._stream.readUInt8()
-            if test_bit(header3, BIT_WCOLOR): # bit[4] = 16
-                tile.WallColor = self._stream.readUInt8()
-        tile.LiquidType = ((header1 & MASK_LIQUID) >> 3) # bits[3:5] = 24
-        if tile.LiquidType != 0:
-            tile.LiquidAmount = self._stream.readUInt8()
-
-        # process header2
-        if header2 > 0:
-            if test_bit(header2, BIT_REDWI):
-                tile.WireRed = True
-            if test_bit(header2, BIT_GREENWI):
-                tile.WireGreen = True
-            if test_bit(header2, BIT_BLUEWI):
-                tile.WireBlue = True
-            tile.BrickStyle = ((header2 & MASK_BSTYLE) >> 4) # bits[4:7] = 112
-
-        # process header3
-        if header3 > 0:
-            if test_bit(header3, BIT_ACTUATE):
-                tile.Actuator = True
-            if test_bit(header3, BIT_INACTIV):
-                tile.InActive = True
-
-        # process RLE
-        rleType = ((header1 & MASK_HASRLE) >> 6)
-        if rleType == 0:
-            rle = 0
-        elif rleType == 1:
-            rle = self._stream.readUInt8()
-        else:
-            rle = self._stream.readInt16()
-
-        return tile, rle
-
-    def LoadAllChests(self):
+    def LoadChests(self):
         self._ensure_offset(self._header.GetChestsPointer())
         chests = []
         totalChests = self._stream.readUInt16()
@@ -519,41 +336,40 @@ class World(object):
             itemsPerChest = Chest.MAX_ITEMS
             overflowItems = maxItems - Chest.MAX_ITEMS
         for i in range(totalChests):
-            chests.append(self._LoadOneChest(itemsPerChest, overflowItems))
+            x = self._stream.readInt32()
+            y = self._stream.readInt32()
+            name = self._stream.readString()
+            c = Chest.Chest(name, x, y)
+            for slot in range(itemsPerChest):
+                stack = self._stream.readInt16()
+                if stack > 0:
+                    item = self._stream.readInt32()
+                    prefix = self._stream.readUInt8()
+                    c.Set(slot, item, prefix, stack)
+            for slot in range(overflowItems):
+                stack = self._stream.readInt16()
+                if stack > 0:
+                    item = self._stream.readInt32()
+                    prefix = self._stream.readUInt8()
+                    c.overflow_items.append(((item, prefix), stack))
+            verbose("Loaded chest %s", c)
+            chests.append(c)
+        verbose("Loaded %d total chests", totalChests)
         self._chests = chests
 
-    def _LoadOneChest(self, itemsPerChest, overflowItems):
-        x = self._stream.readInt32()
-        y = self._stream.readInt32()
-        name = self._stream.readString()
-        c = Chest.Chest(name, x, y)
-        for slot in range(itemsPerChest):
-            stack = self._stream.readInt16()
-            if stack > 0:
-                item = self._stream.readInt32()
-                prefix = self._stream.readUInt8()
-                c.Set(slot, item, prefix, stack)
-        for slot in range(overflowItems):
-            stack = self._stream.readInt16()
-            if stack > 0:
-                item = self._stream.readInt32()
-                prefix = self._stream.readUInt8()
-                c.overflow_items.append(((item, prefix), stack))
-        return c
-
-    def LoadAllSigns(self):
+    def LoadSigns(self):
         self._ensure_offset(self._header.GetSignsPointer())
         signs = []
         totalSigns = self._stream.readInt16()
-        verbose("Loading %d total signs", totalSigns)
         for i in range(totalSigns):
             text = self._stream.readString()
             self._debug("Sign text: %s" % (text,))
             x = self._stream.readInt32()
             y = self._stream.readInt32()
-            verbose("Loaded sign (%d, %d): %s", x, y, text)
+            verbose("Loaded sign (%d, %d): %s", x, y, repr(text))
             self._debug("Offset: %d", self._pos())
             signs.append((x, y, text))
+        verbose("Loaded %d total signs", totalSigns)
         self._signs = signs
 
     def LoadNPCs(self):
@@ -561,24 +377,28 @@ class World(object):
         npcs = []
         mobs = []
         while self._stream.readBoolean():
-            npc = {}
-            npc['Name'] = self._stream.readString()
-            npc['DisplayName'] = self._stream.readString()
-            npc['Position'] = {}
-            npc['Position']['X'] = self._stream.readSingle()
-            npc['Position']['Y'] = self._stream.readSingle()
-            npc['Homeless'] = self._stream.readBoolean()
-            npc['Home'] = {}
-            npc['Home']['X'] = self._stream.readInt32()
-            npc['Home']['Y'] = self._stream.readInt32()
+            name = self._stream.readString()
+            dispname = self._stream.readString()
+            pos_x = self._stream.readSingle()
+            pos_y = self._stream.readSingle()
+            pos = (pos_x, pos_y)
+            homeless = self._stream.readBoolean()
+            home_x = self._stream.readInt32()
+            home_y = self._stream.readInt32()
+            home = (home_x, home_y)
+            npc = Entity.NPCEntity(name=name, display_name=dispname, pos=pos,
+                    homeless=homeless, home=home)
+            verbose("Loaded NPC: %s", npc)
             npcs.append(npc)
         self._npcs = npcs
         if self._header.Version >= Version140:
             while self._stream.readBoolean():
-                mob = {'Name': None, 'Position': {'X': -1, 'Y': -1}}
-                mob['Name'] = self._stream.readString()
-                mob['Position']['X'] = self._stream.readSingle()
-                mob['Position']['Y'] = self._stream.readSingle()
+                name = self._stream.readString()
+                pos_x = self._stream.readSingle()
+                pos_y = self._stream.readSingle()
+                pos = (pos_x, pos_y)
+                mob = Entity.MobEntity(name=name, pos=pos)
+                verbose("Loaded mob: %s", mob)
                 mobs.append(mob)
         self._mobs = mobs
         verbose("Loaded %d NPCs and %d mobs", len(self._npcs), len(self._mobs))
@@ -588,18 +408,23 @@ class World(object):
         tents = []
         count = self._stream.readInt32()
         for i in range(count):
-            entity = {'Type': -1, 'ID': -1, 'Position': {'X': -1, 'Y': -1}}
-            entity['Type'] = self._stream.readByte()
-            entity['Id'] = self._stream.readInt32()
-            entity['Position']['X'] = self._stream.readInt16()
-            entity['Position']['Y'] = self._stream.readInt16()
-            if entity['Type'] == 0: # dummy
-                entity['NPC'] = self._stream.readInt16()
-            elif entity['Type'] == 1:   # item frame
-                entity['ItemNetID'] = self._stream.readInt16()
-                entity['Prefix'] = self._stream.readByte()
-                entity['Stack'] = self._stream.readInt16()
-            tents.append(entity)
+            tent = None
+            type_ = self._stream.readByte()
+            id_ = self._stream.readInt32()
+            pos_x = self._stream.readInt16()
+            pos_y = self._stream.readInt16()
+            pos = (pos_x, pos_y)
+            if type_ == Entity.ENTITY_DUMMY:
+                npc = self._stream.readInt16()
+                tent = Entity.DummyTileEntity(type=type_, id=id_, pos=pos, npc=npc)
+            elif type_ == Entity.ENTITY_ITEM_FRAME:
+                item = self._stream.readInt16()
+                prefix = self._stream.readByte()
+                stack = self._stream.readInt16()
+                tent = Entity.ItemFrameTileEntity(type=type_, id=id_, pos=pos,
+                        item=item, prefix=prefix, stack=stack)
+            verbose("Loaded tile entity: %s", tent)
+            tents.append(tent)
         self._tents = tents
 
     def LoadFooter(self):
@@ -615,20 +440,20 @@ class World(object):
 
     def EachTile(self):
         "Returns an iterable of (row, col, Tile) for each tile"
-        for y in xrange(self.GetHeaderFlag('TilesHigh')):
-            for x in xrange(self.GetHeaderFlag('TilesWide')):
+        for y in xrange(self.GetWorldFlag('TilesHigh')):
+            for x in xrange(self.GetWorldFlag('TilesWide')):
                 yield y, x, self.GetTile(x, y)
 
     def GetTile(self, i, j):
         return self._tiles[self._PosToIdx(i, j)]
 
-    def GetHeaderFlags(self):
+    def GetWorldFlags(self):
         flags = []
         for flag, _, _ in WorldFlags.Flags:
             flags.append((flag, self._flags.getFlag(flag)))
         return tuple(flags)
 
-    def GetHeaderFlag(self, flag):
+    def GetWorldFlag(self, flag):
         return self._flags.getFlag(flag)
 
     def GetNPCs(self):

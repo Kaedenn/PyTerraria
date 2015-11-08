@@ -29,16 +29,6 @@ def _make_token_from(title):
             r += '_'
     return r
 
-def _find_world(worldname):
-    path_lin = os.path.expanduser("~/.local/share/Terraria/Worlds")
-    if os.path.exists(path_lin):
-        world = os.path.join(path_lin, worldname + ".wld")
-        if not os.path.exists(world):
-            raise RuntimeError("%s not a valid path" % (world,))
-        return world
-    else:
-        raise RuntimeError("Terraria world folder not found")
-
 def _tile_to_string(tile):
     fmt = "%d %s (u:%d, v:%d) %d %s" % (
             tile.Type, IDs.TileID[tile.Type], tile.U, tile.V,
@@ -96,6 +86,12 @@ If --tile-table-expr is present, the output will be just an expression:
     [(ID, Wall), (ID, Wall), ...],
     ...
 ]
+
+If --tile-table-packed is present, each tile will be a packed 64-bit integer:
+Bit     0 1 2 3 4 5 6 7 8 9 a b c d e f 0 1 2 3 4 5 6 7 8 9 a b c d e f
+Content <- tile type -----------------> <- tile u -------------------->
+Bit     0 1 2 3 4 5 6 7 8 9 a b c d e f 0 1 2 3 4 5 6 7 8 9 a b c d e f
+Content <- tile v --------------------> <- wall ------> <- flags ----->
 """
 
     HELP_FIND = """Using the find argument:
@@ -159,6 +155,8 @@ For example,
                    help="print tile ID and frame coordinates (U,V)")
     p.add_argument("--tile-table-expr", action="store_true",
                    help="suppress assignment expr in the tile table")
+    p.add_argument("--tile-table-packed", action="store_true",
+                   help="output tiles as a packed 64bit integer")
     p.add_argument("-t", action="store_true",
                    help="format numerical outputs as tables")
     p.add_argument("--find", action="append",
@@ -184,7 +182,8 @@ For example,
             print(HELP_FIND)
         raise SystemExit(0)
 
-    if args.tile_table_ids or args.tile_table_uv and not args.tile_table:
+    if any((args.tile_table_ids, args.tile_table_uv, args.tile_table_expr,
+            args.tile_table_packed)) and not args.tile_table:
         args.tile_table = True
 
     if args.ignore_tiles and args.tile_table:
@@ -203,7 +202,7 @@ For example,
                     load_chests=(not args.ignore_chests),
                     load_signs=(not args.ignore_signs),
                     verbose=args.verbose, debug=args.debug)
-    w.Load(open(path, 'r').read())
+    w.Load(open(path, 'r'))
 
     if args.pointers:
         h = w.GetHeader()
@@ -231,7 +230,7 @@ For example,
         print(fmt % ("Footer", footer, h.FileSize-footer))
 
     if args.headers:
-        h = w.GetHeaderFlags()
+        h = w.GetWorldFlags()
         for k,v in h:
             if k.startswith('OreTier'):
                 print("%s = %d %s" % (k, v, IDs.TileID[int(v)]))
@@ -244,7 +243,7 @@ For example,
             print("%-5s %4s %s" % ("Kills", "ID", "Name"))
             fmt = "%5d %4d %s"
         results = []
-        for bannerid, killcount in enumerate(w.GetHeaderFlag("KilledMobs")):
+        for bannerid, killcount in enumerate(w.GetWorldFlag("KilledMobs")):
             if args.less_than_50 and killcount >= 50:
                 continue
             if bannerid < len(IDs.BannerToNPC):
@@ -300,22 +299,24 @@ For example,
                     print("%s (%d, %d)" % (_tile_to_string(tile), col, row))
 
     if args.tile_table:
+        var = "TILES_%s = [" % (_make_token_from(w.GetWorldFlag("Title")),)
         if args.tile_table_expr:
-            print('[')
-        else:
-            title = _make_token_from(w.GetHeaderFlag("Title"))
-            print("TILES_%s = [" % (title,))
-        for row in range(w.GetHeaderFlag("TilesHigh")):
+            var = "["
+        print(var)
+        for row in range(w.GetWorldFlag("TilesHigh")):
+            # w.EachTile() won't work here because of how this is laid out
             tileRow = []
-            for col in range(w.GetHeaderFlag("TilesWide")):
+            for col in range(w.GetWorldFlag("TilesWide")):
                 tile = w.GetTile(col, row)
                 if args.tile_table_ids:
                     tileRow.append(tile.ToSimpleType())
                 elif args.tile_table_uv:
                     tileRow.append((tile.Type, tile.U, tile.V))
+                elif args.tile_table_packed:
+                    tileRow.append(tile.ToPackedInt64())
                 else:
                     tileRow.append(tile.ToSimpleID())
-            print("    %s," % (tileRow,))
+            print("    [%s]," % (", ".join(str(i) for i in tileRow),))
         print("]")
 
     if args.npcs:
