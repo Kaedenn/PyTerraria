@@ -7,6 +7,29 @@ import zlib
 import FileMetadata
 from BinaryString import BinaryString
 
+"""
+Sections:
+    Tile Options    12 options per tile
+    Wall Options    2 options per wall
+    Liquid Options  3 options total
+    Sky Gradients   256 options
+    Dirt Gradiets   256 options
+    Rock Gradients  256 options
+
+Things left to do:
+
+!) Figure out what the map stores and what I need to calculate
+!) Figure out what can be persisted and what must be calculated
+
+1) Implement the tile->color lookup table (MapHelper::Initialize)
+    * Store as a serialized asset in an external file?
+2) Implement the tile->map tile conversion (MapHelper::CreateMapTile)
+    * Implement polymorphically?
+    * Implement as a serialized mapping (id, wall, u, v, light, ...?) -> (tile, opt)
+3) Implement the options array in full (MapHelper::Initialize, Map.GenerateTileTypes)
+    * Store as a serialized asset in an external file?
+"""
+
 FILE_MAGIC = FileMetadata.FILE_MAGIC
 FILE_MAGIC_MAP = FileMetadata.FILE_MAGIC_MAP
 
@@ -45,7 +68,30 @@ class FileHeader(object):
 
 class Map(object):
     def __init__(self, fname=None, fobj=None, verbose=False):
+        self._header = None
+        self._tile_types = 0
+        self._wall_types = 0
+        self._water_types = 0
+        self._lava_types = 0
+        self._honey_types = 0
+        self._heaven_and_hell_types = 0
+        self._background_types = 0;
+        self.HeaderEmpty = 0
+        self.HeaderTile = 1
+        self.HeaderWall = 2
+        self.HeaderWater = 3
+        self.HeaderLava = 4
+        self.HeaderHoney = 5
+        self.HeaderHeavenAndHell = 6
+        self.HeaderBackground = 7
+        self.MaxTileOpts = 12
+        self.MaxWallOpts = 2
+        self.MaxLiquidTypes = 3
+        self.MaxSkyGradients = 256
+        self.MaxDirtGradients = 256
+        self.MaxRockGradients = 256
         self._is_verbose = verbose
+        self._log = ''
         if fname is not None and fobj is not None:
             raise ValueError("fname and fobj are mutually exclusive")
         if fname is None and fobj is not None:
@@ -53,12 +99,22 @@ class Map(object):
         if fname is not None and fobj is None:
             self.Load(open(fname, 'r'))
 
+    def log(self, x, y, w, h, stream):
+        self._log = "x:%d y:%d wxh: %dx%d pos: %d" % (x, y, w, h, stream.get_pos())
+
     def verbose(self, *args):
         if self._is_verbose:
             for arg in args:
                 sys.stderr.write("%s\n" % (arg,))
 
     def Load(self, fobj):
+        try:
+            self._Load(fobj)
+        except (IOError, EOFError, IndexError, AssertionError) as e:
+            print(self._log)
+            raise
+
+    def _Load(self, fobj):
         self._stream = BinaryString(fobj.read(), verbose=self._is_verbose)
         self._header = FileHeader(verbose=self._is_verbose)
         self._numTileOpts = -1
@@ -72,9 +128,8 @@ class Map(object):
         self.LoadMetadata()
         self.LoadCounts()
         self.LoadOpts()
-        self.verbose("Offset: %s" % (self._stream.get_pos(),))
-        self.LoadTiles()
-        self.LoadWorld(4200, 1200)
+        self.GenerateTileTypes()
+        self.LoadMapTiles(self._maxTilesX, self._maxTilesY)
 
     def LoadMetadata(self):
         self._header.Version = self._stream.readUInt32()
@@ -88,25 +143,14 @@ class Map(object):
         self._worldID = self._stream.readInt32()
         self._maxTilesY = self._stream.readInt32()
         self._maxTilesX = self._stream.readInt32()
-        self.verbose("World size: %d rows by %d columns" % (self._maxTilesY, self._maxTilesX))
         self._numTileOpts = self._stream.readInt16()
-        self.verbose("numTileOpts = %d" % (self._numTileOpts,))
-        assert_eq(self._numTileOpts, 419)
         self._numWallOpts = self._stream.readInt16()
-        self.verbose("numWallOpts = %d" % (self._numWallOpts,))
-        assert_eq(self._numWallOpts, 225)
-        self._unknown3 = self._stream.readInt16()
-        assert_eq(self._unknown3, 3)
-        self._unknown255_1 = self._stream.readInt16()
-        assert_eq(self._unknown255_1, 256)
-        self._unknown255_2 = self._stream.readInt16()
-        assert_eq(self._unknown255_2, 256)
-        self._unknown255_3 = self._stream.readInt16()
-        assert_eq(self._unknown255_3, 256)
+        self._numLiquidOpts = self._stream.readInt16()
+        self._numSkyOpts = self._stream.readInt16()
+        self._numDirtOpts = self._stream.readInt16()
+        self._numRockOpts = self._stream.readInt16()
         self._tileOptMap = self._stream.readBitArray(self._numTileOpts)
-        self.verbose("read tile opt map")
         self._wallOptMap = self._stream.readBitArray(self._numWallOpts)
-        self.verbose("read wall opt map")
 
     def LoadOpts(self):
         self._tileOpts = [1]*self._numTileOpts
@@ -122,34 +166,78 @@ class Map(object):
                 self._totalWallOpts += self._wallOpts[i]
         self.verbose("read all wall opts")
 
-    def LoadTiles(self):
+    def GenerateTileTypes(self):
         self._tileTypes = [0]*(self._totalTileOpts + self._totalWallOpts +
-                               self._unknown3 + self._unknown255_1 +
-                               self._unknown255_2 + self._unknown255_3 + 2)
+                               self._numLiquidOpts + self._numSkyOpts +
+                               self._numDirtOpts + self._numRockOpts + 2)
         self._tileTypes[0] = 0
+        #self._colorTypes = [(0, 0, 0, 0)]*len(self._numColors)
         self.verbose("Total tile types: %s" % (len(self._tileTypes),))
 
-    def LoadWorld(self, width, height):
+    def LoadMapTiles(self, width, height):
         self.verbose("Offset: %s" % (self._stream.get_pos(),))
         data = zlib.decompress(self._stream.getContent(remainder=True), -15)
         stream = BinaryString(data)
+        offsets = [0, 0, 0, 0, 0, 0]
         x, y = 0, 0
         while y < height:
             while x < width:
+                self.log(x, y, width, height, stream)
+                assert x >= 0
                 header1 = stream.readByte()
                 header2 = 0 if (header1 & 1) == 0 else stream.readByte()
-                mask14 = (header1 & 14) >> 3
-                flag14 = (mask14 in (1, 2, 7))
+                section = (header1 & 14) >> 3
+                hasOwnType = (section in (1, 2, 7))
                 tileIdx = 0
-                if (header1 & 16) != 16:
-                    tileIdx = stream.readByte()
-                else:
-                    tileIdx = stream.readUInt16()
-                tileLight = 0
+                if hasOwnType:
+                    if (header1 & 16) != 16:
+                        tileIdx = stream.readByte()
+                    else:
+                        tileIdx = stream.readUInt16()
+                light = 0
                 if (header1 & 32) != 32:
                     light = 255
                 else:
                     light = stream.readByte()
+                rleType = ((header1 & 192) >> 6)
+                rle = 0
+                if rleType == 1:
+                    rle = stream.readByte()
+                elif rleType == 2:
+                    rle = stream.readInt16()
+                if section == 0:
+                    x += rle
+                else:
+                    if section == 1:
+                        pass
+                        # tileIdx += posTileOpts
+                    elif section == 2:
+                        pass
+                        # tileIdx += posWallOpts
+                    elif section in (3, 4, 5):
+                        pass
+                        # tileIdx += num22 + section - 3
+                    elif section == 6:
+                        if y < WORLD_SURFACE:
+                            pass
+                            #offset = num7 * y / Main.worldSurface;
+                            #tileIdx += num23 + offset;
+                        else:
+                            pass
+                            # y = num26
+                    tile = [self._tileTypes[tileIdx], light, (header2 >> 1) & 31]
+                    # SetTile(x, y, tile)
+                    if light == 256:
+                        while rle > 0:
+                            x += 1
+                            # SetTile(x, y, tile)
+                            rle -= 1
+                    else:
+                        while rle > 0:
+                            x += 1
+                            tile[1] = stream.readByte()
+                            # SetTile(x, y, tile)
+                            rle -= 1
                 x += 1
             y += 1
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import csv
 import os
 import sys
 
@@ -54,7 +55,8 @@ will be a 2D list named TILES_<worldname>. Importing the resulting script can
 cause Python to segfault on large worlds.
 
 Use --help-table for help on the tile table arguments.
-Use --help-match for help on the find argument.
+Use --help-find for help on the find argument.
+Use --find-examples for example values for the find argument.
 """, formatter_class=argparse.RawTextHelpFormatter)
     
     HELP_TABLE = """Using the tile table arguments:
@@ -123,56 +125,81 @@ For example,
 "1;None;3" finds all tiles with Type == 1 and V == 3
 "1;;3" also finds all tiles with Type == 1 and V == 3
 """
-    p.add_argument("path",
-                   help="a world file path, world name, or world file name")
-    p.add_argument("-w", "--world", default=None,
-                   help="file name of world to load")
+
+    FIND_EXAMPLES = """Useful values for the find argument:
+
+To find all gem tiles:
+    --find '63-68;178'
+    --find 'Sapphire;Ruby;Emerald;Topaz;Amethyst;Diamond;ExposedGems'
+    --find 'Sapphire-Diamond;ExposedGems'
+
+To find all tiles of a given name:
+    --find Silt
+    --find Slush
+    --find Adamantite
+"""
+    p.add_argument("path", nargs='?', default=None,
+                   help="a world file path, file name, or world name")
     p.add_argument("-T", "--ignore-tiles", action="store_true",
                    help="don't load tile data")
     p.add_argument("-C", "--ignore-chests", action="store_true",
                    help="don't load chests")
     p.add_argument("-S", "--ignore-signs", action="store_true",
                    help="don't load signs")
-    p.add_argument("--headers", action="store_true",
-                   help="display the world header flags")
-    p.add_argument("--pointers", action="store_true",
-                   help="display file offset pointers")
-    p.add_argument("--kills", action="store_true",
-                   help="display mob/banner kill counts")
-    p.add_argument("--less-than-50", action="store_true",
-                   help="display only mob/banner kill counts less than 50")
-    p.add_argument("--sort-kills", choices=("banner", "count", "id", "mob"),
-                   default=None, help="sort kill counts by choice given")
-    p.add_argument("--counts", action="store_true",
-                   help="display tile counts")
-    p.add_argument("--gem-counts", action="store_true",
-                   help="display gem tile counts")
-    p.add_argument("--tile-table", action="store_true",
-                   help="print a complete tile table (redirect to a file!)")
-    p.add_argument("--tile-table-ids", action="store_true",
-                   help="only print tile IDs when writing the tile table")
-    p.add_argument("--tile-table-uv", action="store_true",
-                   help="print tile ID and frame coordinates (U,V)")
-    p.add_argument("--tile-table-expr", action="store_true",
-                   help="suppress assignment expr in the tile table")
-    p.add_argument("--tile-table-packed", action="store_true",
-                   help="output tiles as a packed 64bit integer")
-    p.add_argument("-t", action="store_true",
-                   help="format numerical outputs as tables")
-    p.add_argument("--find", action="append",
-                   help="print locations of t or t,u,v")
-    p.add_argument("--npcs", action="store_true",
-                   help="print all NPCs")
-    p.add_argument("--tents", action="store_true",
-                   help="print all tile entities")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="be more verbose")
     p.add_argument("-d", "--debug", action="store_true",
                    help="be extremely verbose")
-    p.add_argument("--help-table", action="store_true",
-                   help="display help on the tile table arguments")
-    p.add_argument("--help-find", action="store_true",
+
+    o = p.add_argument_group("Output Specification")
+    o.add_argument("--pointers", action="store_true",
+                   help="display file offset pointers")
+    o.add_argument("--world-flags", action="store_true",
+                   help="display the world flags")
+    o.add_argument("--kills", action="store_true",
+                   help="display mob/banner kill counts")
+    o.add_argument("--less-than-50", action="store_true",
+                   help="display only mob/banner kill counts less than 50")
+    o.add_argument("--sort-kills", choices=("banner", "count", "id", "mob"),
+                   default=None, help="sort kill counts by choice given")
+    o.add_argument("--counts", action="store_true",
+                   help="display tile counts")
+    o.add_argument("--gem-counts", action="store_true",
+                   help="display gem tile counts")
+    o.add_argument("-t", action="store_true",
+                   help="format numerical outputs as tables")
+    o.add_argument("--npcs", action="store_true",
+                   help="print all NPCs")
+    o.add_argument("--tents", action="store_true",
+                   help="print all tile entities")
+
+    f = p.add_argument_group("Find Arguments")
+    f.add_argument("--find", action="append", metavar="EXPR",
+                   help="print locations of tiles (see --help-find)")
+    f.add_argument("--find-examples", action="store_true",
+                   help="display various useful arguments to --find")
+    f.add_argument("-o", "--out", type=str, default=None, metavar="PATH",
+                   help="write the find results to this file")
+    f.add_argument("--out-csv", action="store_true",
+                   help="write the find results in CSV format")
+    f.add_argument("--density", action="store_true",
+                   help="output a file suitable for density analysis")
+    f.add_argument("--help-find", action="store_true",
                    help="display help on the find argument")
+
+    t = p.add_argument_group("Tile Table Arguments")
+    t.add_argument("--tile-table", action="store_true",
+                   help="print a complete tile table (redirect to a file!)")
+    t.add_argument("--tile-table-ids", action="store_true",
+                   help="only print tile IDs when writing the tile table")
+    t.add_argument("--tile-table-uv", action="store_true",
+                   help="print tile ID and frame coordinates (U,V)")
+    t.add_argument("--tile-table-expr", action="store_true",
+                   help="suppress assignment expr in the tile table")
+    t.add_argument("--tile-table-packed", action="store_true",
+                   help="output tiles as a packed 64bit integer")
+    t.add_argument("--help-table", action="store_true",
+                   help="display help on the tile table arguments")
     args = p.parse_args()
 
     if args.help_table or args.help_find:
@@ -182,6 +209,9 @@ For example,
             print(HELP_FIND)
         raise SystemExit(0)
 
+    if args.find_examples:
+        print(FIND_EXAMPLES)
+
     if any((args.tile_table_ids, args.tile_table_uv, args.tile_table_expr,
             args.tile_table_packed)) and not args.tile_table:
         args.tile_table = True
@@ -189,19 +219,22 @@ For example,
     if args.ignore_tiles and args.tile_table:
         p.error("--ignore-tiles and --tile-table are mutually exclusive")
 
-    if args.verbose or args.debug:
-        global VERBOSE_MODE
-        VERBOSE_MODE = True
-        World.VERBOSE_MODE = True
-
-    path = args.path
-    if not os.path.exists(path):
-        path = World.World.FindWorld(args.path)
+    World.VERBOSE_MODE = args.verbose or args.debug
+    World.DEBUG_MODE = args.debug
 
     w = World.World(load_tiles=(not args.ignore_tiles),
                     load_chests=(not args.ignore_chests),
                     load_signs=(not args.ignore_signs),
                     verbose=args.verbose, debug=args.debug)
+
+    if args.path is None:
+        World.verbose("Nothing to do; exiting")
+        raise SystemExit(0)
+
+    path = args.path
+    if not os.path.exists(path):
+        path = World.World.FindWorld(args.path)
+
     w.Load(open(path, 'r'))
 
     if args.pointers:
@@ -229,7 +262,7 @@ For example,
             print(fmt % ("Tile Entities", tents, footer-tents))
         print(fmt % ("Footer", footer, h.FileSize-footer))
 
-    if args.headers:
+    if args.world_flags:
         h = w.GetWorldFlags()
         for k,v in h:
             if k.startswith('OreTier'):
@@ -262,12 +295,16 @@ For example,
             print(fmt % result)
 
     if args.counts:
+        if args.ignore_tiles:
+            p.error("--ignore-tiles blocks --counts")
         counts = w.CountTiles()
         types = sorted(counts.keys())
         for t in types:
             print("%-6d %d %s" % (counts[t], t, IDs.TileID[t]))
 
     if args.gem_counts:
+        if args.ignore_tiles:
+            p.error("--ignore-tiles blocks --gem-counts")
         results = []
         for row, col, tile in w.EachTile():
             if IDs.Tiles['Sapphire'] <= tile.Type <= IDs.Tiles['Diamond']:
@@ -292,13 +329,39 @@ For example,
                 print("%d %d %s %d %s" % (c, t, tname, i, iname))
 
     if args.find:
-        exprs = list([Match.parse_match(m) for m in args.find])
+        if args.ignore_tiles:
+            p.error("--ignore-tiles blocks --find")
+        # TODO: provide configuration to specify EXACTLY the format of
+        # the tile string (perhaps a custom printf-like syntax? or
+        # something like that?)
+        # TODO: incorporate density analysis (input: window size)
+        terms = list([Match.Match(m, IDs.Tiles) for m in args.find])
+        matches = []
         for row, col, tile in w.EachTile():
-            for expr in exprs:
-                if Match.do_match(expr, tile.Type, tile.U, tile.V):
-                    print("%s (%d, %d)" % (_tile_to_string(tile), col, row))
+            for term in terms:
+                if term.match(tile.Type, tile.U, tile.V):
+                    matches.append((tile, col, row))
+        out = sys.stdout
+        if args.out is not None:
+            out = open(args.out, 'w')
+        if args.density:
+            width = w.GetWorldFlag('TilesWide')
+            height = w.GetWorldFlag('TilesHigh')
+            m = [[0]*(width) for _ in xrange(height)]
+            for t, c, r in matches:
+                m[r][c] += 1
+            writer = csv.writer(out)
+            writer.writerows(m)
+        else:
+            header = "Tile,X,Y\n" if args.out_csv else "Tile (x, y)\n"
+            entry = '"%s",%d,%d\n' if args.out_csv else "%s (%d, %d)\n"
+            out.write(header)
+            for t, c, r in matches:
+                out.write(entry % (_tile_to_string(t), c, r))
 
     if args.tile_table:
+        if args.ignore_tiles:
+            p.error("--ignore-tiles blocks tile table arguments")
         var = "TILES_%s = [" % (_make_token_from(w.GetWorldFlag("Title")),)
         if args.tile_table_expr:
             var = "["

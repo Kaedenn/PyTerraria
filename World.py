@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import copy
 import os
 import sys
 import warnings
@@ -15,9 +16,18 @@ import Chest
 import Entity
 
 VERBOSE_MODE = False
+DEBUG_MODE = False
 
 def verbose(string, *args):
     if VERBOSE_MODE:
+        if args:
+            sys.stderr.write(string % args)
+        else:
+            sys.stderr.write(string)
+        sys.stderr.write("\n")
+
+def debug(string, *args):
+    if DEBUG_MODE:
         if args:
             sys.stderr.write(string % args)
         else:
@@ -31,39 +41,6 @@ def test_bit(value, bit):
     return (value & bit) == bit
 
 WORLDPATH_LINUX = os.path.expanduser("~/.local/share/Terraria/Worlds")
-
-# Is there another byte of metadata present?
-BIT_MOREHDR = 0b00000001 # All Headers: 1
-# Is a tile present at this entry?
-BIT_ACTIVE =  0b00000010 # Header 1: 2
-# Does this entry have a wall?
-BIT_HASWALL = 0b00000100 # Header 1: 4
-# Does this entry have liquid?
-MASK_LIQUID = 0b00011000 # Header 1: 24 (8+16)
-# Does this entry have a 16bit tile type?
-BIT_TYPE16B = 0b00100000 # Header 1: 32
-# Does this entry's tile have a color?
-BIT_TCOLOR =  0b00001000 # Header 3: 8
-# Does this entry's wall have a color?
-BIT_WCOLOR =  0b00010000 # Header 3: 16
-# Does this entry have a red wire?
-BIT_REDWI =   0b00000010 # Header 2: 2
-# Does this entry have a green wire?
-BIT_GREENWI = 0b00000100 # Header 2: 4
-# Does this entry have a blue wire?
-BIT_BLUEWI =  0b00001000 # Header 2: 8
-# Does this brick have a style?
-MASK_BSTYLE = 0b01110000 # Header 2: 112
-# Does this entry have an actuator?
-BIT_ACTUATE = 0b00000010 # Header 3: 2
-# Is this entry inactive due to an actuator?
-BIT_INACTIV = 0b00000100 # Header 3: 4
-# Does this entry have an RLE?
-MASK_HASRLE = 0b11000000 # Header 1: 192 (128+64)
-# Is this RLE of type 1? (8bit RLE)
-BIT_HASRLE1 = 0b01000000 # Header 1: 64
-# Is this RLE of type 2? (16bit RLE)
-BIT_HASRLE2 = 0b10000000 # Header 1: 128
 
 class World(object):
     def _PosToIdx(self, x, y):
@@ -79,6 +56,7 @@ class World(object):
         self._stream.seek_set(offset)
 
     def __init__(self, fname=None, fobj=None,
+                 read_only=True,
                  load_tiles=True,
                  load_chests=True,
                  load_signs=True,
@@ -86,6 +64,7 @@ class World(object):
                  load_tents=True,
                  verbose=False, debug=False):
         global VERBOSE_MODE
+        self._readonly = read_only
         self._extents = None
         self._header = None
         self._flags = None
@@ -159,7 +138,8 @@ class World(object):
 
     def Load(self, fobj=None):
         if fobj is not None:
-            self._stream = BinaryString.BinaryString(fobj.read(), debug=self._debug_enabled)
+            self._stream = BinaryString.BinaryString(fobj.read(),
+                    debug=self._debug_enabled)
         # Populate self._header
         self.LoadFileHeader()
 
@@ -178,7 +158,7 @@ class World(object):
         self._extents = [self._flags.TilesWide, self._flags.TilesHigh]
         if self._should_load_tiles:
             # Populate self._tiles
-            self.LoadTileData(self._flags.TilesWide, self._flags.TilesHigh)
+            self.LoadTiles(self._flags.TilesWide, self._flags.TilesHigh)
             assert self._pos() == self._header.GetChestsPointer()
         else:
             self._stream.seek_set(self._header.GetChestsPointer())
@@ -262,6 +242,9 @@ class World(object):
                         # hard mode yet
                         assert not flags.getFlag('HardMode')
                 flags.setFlag(name, value)
+        self._width = flags.TilesWide
+        self._height = flags.TilesHigh
+        self._extents = [flags.TilesWide, flags.TilesHigh]
         self._flags = flags
 
     def _LoadAnglers(self, num_anglers):
@@ -287,42 +270,46 @@ class World(object):
             flags.append(self._stream.readUInt8())
         return flags
 
-    def LoadTileData(self, width, height):
+    def LoadTiles(self, w, h):
         self._ensure_offset(self._header.GetTilesPointer())
-        verbose("Loading %d tiles (%d by %d)" % (width*height, width, height))
-        startPos = self._header.SectionPointers[1]
-        endPos = self._header.SectionPointers[2]
-        section_size = endPos - startPos
-        verbose("Section is %s bytes long" % (section_size,))
-        tiles = [None]*(width*height)
+        verbose("Loading %d tiles (%d by %d)" % (w*h, w, h))
+        start = self._header.SectionPointers[1]
+        end = self._header.SectionPointers[2]
+        size = end - start
+        verbose("Section is %s bytes long" % (size,))
+        tiles = [None]*(w*h)
         x, y = 0, 0
         nloaded = 0
-        nprocessed = 0
-        while x < width and self._pos() < endPos:
+        # renaming shortcuts
+        important = self._header.ImportantTiles
+        while x < w and self._pos() < end:
             y = 0
-            while y < height and self._pos() < endPos:
-                tile, rle = Tile.FromStream(self._stream, self._header.ImportantTiles)
+            while y < h and self._pos() < end:
+                i = self._PosToIdx(x, y)
+                tile, rle = Tile.FromStream(self._stream, important)
                 nloaded += 1
-                nprocessed += 1
-                tiles[self._PosToIdx(x, y)] = tile
+                tiles[i] = tile
                 while rle > 0:
                     y += 1
-                    tiles[self._PosToIdx(x, y)] = tile
-                    nprocessed += 1
+                    i += w
+                    if self._readonly:
+                        tiles[i] = tile
+                    else:
+                        # extremely expensive, so do it only when required
+                        tiles[i] = copy.copy(tile)
                     rle -= 1
                 y += 1
             x += 1
-        if self._pos() > endPos:
-            overread = endPos - self._pos()
+        if self._pos() > end:
+            overread = end - self._pos()
             warn("Read %d bytes past the end of the section!" % (overread,))
-        elif self._pos() == endPos and (x < width or y < height):
-            xerr = width - x
-            yerr = height - y
+        elif self._pos() == end and (x < w or y < h):
+            xerr = w - x
+            yerr = h - y
             warn("Incomplete section! Terminated on tile (%d, %d)" % (x, y))
             warn("Rows left to parse: %d, columns left to parse: %d" %
                     (xerr, yerr))
         verbose("Actually loaded %d tiles" % (nloaded,))
-        verbose("Actually processed %d tiles" % (nprocessed,))
         self._tiles = tiles
 
     def LoadChests(self):
@@ -440,9 +427,9 @@ class World(object):
 
     def EachTile(self):
         "Returns an iterable of (row, col, Tile) for each tile"
-        for y in xrange(self.GetWorldFlag('TilesHigh')):
-            for x in xrange(self.GetWorldFlag('TilesWide')):
-                yield y, x, self.GetTile(x, y)
+        for y in xrange(self._height):
+            for x in xrange(self._width):
+                yield y, x, self._tiles[self._PosToIdx(x, y)]
 
     def GetTile(self, i, j):
         return self._tiles[self._PosToIdx(i, j)]
