@@ -101,7 +101,7 @@ class Tile(object):
     )
     SerializedLookup = dict(SerializedAttributes)
 
-    def __init__(self, lazy=False):
+    def __init__(self, lazy=False, **attribs):
         if not lazy:
             self.IsActive = False
             self.WireRed = False
@@ -118,9 +118,50 @@ class Tile(object):
             self.InActive = False   # inactive due to actuator
             self.U = -1 # int16
             self.V = -1 # int16
+        for k,v in attribs.iteritems():
+            if k in Tile.SerializedLookup:
+                setattr(self, k, v)
+
+    def _properties(self):
+        return {
+            "IsActive": self.IsActive,
+            "WireRed": self.WireRed,
+            "WireGreen": self.WireGreen,
+            "WireBlue": self.WireBlue,
+            "TileColor": self.TileColor,
+            "Type": self.Type,
+            "Name": IDs.TileID[self.Type] if self.IsActive else '',
+            "Wall": self.Wall,
+            "WallName": IDs.WallID[self.Wall] if self.Wall != 0 else '',
+            "WallColor": self.WallColor,
+            "LiquidType": self.LiquidType,
+            "LiquidAmount": self.LiquidAmount,
+            "BrickStyle": self.BrickStyle,
+            "Actuator": self.Actuator,
+            "InActive": self.InActive,
+            "U": self.U,
+            "V": self.V
+        }
 
     def __getattr__(self, attrib):
+        if attrib == "Name":
+            return IDs.TileID[self.Type] if self.IsActive else ''
         return Tile.SerializedLookup[attrib]
+
+    def Format(self, fmt):
+        """Format a tile as a string
+        See Tile.SerializedLookup for a list of valid keys
+        """
+        properties = self._properties()
+        properties['Tile'] = properties['Type']
+        return fmt % properties
+
+    def ToTuple(self):
+        return ((a, getattr(self, a)) for a,d in Tile.SerializedAttributes)
+
+    def FromTuple(self, values):
+        for attr, val in zip(Tile.SerializedAttributes, val):
+            setattr(self, attr[0], val)
 
     def ToSimpleType(self):
         "Returns the tile's type, if active, otherwise -1"
@@ -191,24 +232,9 @@ class Tile(object):
         return repr(self) != repr(other)
 
     def __repr__(self):
-        content = ", ".join((
-            "%s = %s" % ("IsActive", self.IsActive),
-            "%s = %s" % ("WireRed", self.WireRed),
-            "%s = %s" % ("WireGreen", self.WireGreen),
-            "%s = %s" % ("WireBlue", self.WireBlue),
-            "%s = %s" % ("TileColor", self.TileColor),
-            "%s = %s" % ("Type", self.Type),
-            "%s = %s" % ("Name", IDs.TileID[self.Type]),
-            "%s = %s" % ("Wall", self.Wall),
-            "%s = %s" % ("WallColor", self.WallColor),
-            "%s = %s" % ("LiquidType", self.LiquidType),
-            "%s = %s" % ("LiquidAmount", self.LiquidAmount),
-            "%s = %s" % ("BrickStyle", self.BrickStyle),
-            "%s = %s" % ("Actuator", self.Actuator),
-            "%s = %s" % ("InActive", self.InActive),
-            "%s = %s" % ("U", self.U),
-            "%s = %s" % ("V", self.V)
-        ))
+        attrs = [a for a,v in Tile.SerializedAttributes if \
+                getattr(self, a) != Tile.SerializedLookup[a]]
+        content = ", ".join(("%s=%r" % (a, getattr(self, a))) for a in attrs)
         return "Tile(%s)" % (content,)
 
 def FromStream(stream, importantTiles):

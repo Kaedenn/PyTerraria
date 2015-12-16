@@ -67,22 +67,33 @@ TypeNames = {
     DoubleType: 'double-precision float'
 }
 
-def typestr(typeid):
-    return '<' + typeid
+class DataError(IOError):
+    def __init__(self, *args, **kwargs):
+        super(DataError, self).__init__(*args, **kwargs)
 
-def _make_reader(t, scalar=True):
+def _make_reader(t, scalar=True, bounds=None):
     typeid, nbytes = t
-    ts = typestr(typeid)
+    ts = "<%s" % (typeid,)
     def reader(self):
         bytevals = struct.unpack(ts, self._next(nbytes))
         return bytevals[0] if scalar else bytevals
     reader.__doc__ = "Reads %d byte%s as a little-endian %s type" % (
             nbytes, "" if nbytes == 1 else "s", TypeNames[t])
+    if bounds is not None:
+        low, high = bounds
+        def checker(self):
+            value = reader(self)
+            if not low <= value <= high:
+                raise DataError("Value %s not between [%s,%s]" % (value, low,
+                    high))
+            return value
+        checker.__doc__ = reader.__doc__ + " (bound to [%s, %s])" % (low, high)
+        return checker
     return reader
 
 def _make_writer(t, scalar=True):
     typeid, nbytes = t
-    ts = typestr(typeid)
+    ts = "<%s" % (typeid,)
     def writer(self, data):
         bytevals = struct.pack(ts, data)
         self.write(bytevals[0] if scalar else bytevals)
@@ -95,7 +106,7 @@ class BinaryString(object):
     1) Inherit class file and operate on a stream, not a str
     2) Implement symmetric writers
     """
-    readBoolean = _make_reader(BooleanType)
+    readBoolean = _make_reader(BooleanType, bounds=(0, 1))
     readByte = _make_reader(ByteType)
     readInt8 = _make_reader(SInt8Type)
     readUInt8 = _make_reader(UInt8Type)
@@ -168,7 +179,7 @@ class BinaryString(object):
         if self._pos > len(self._content):
             nb = self._pos - len(self._content)
             raise EOFError("Attempt to read %d bytes beyond EOF" % (nb,))
-        if self._debug_on and not result:
+        if self._debug_on and not result and nbytes > 0:
             off_pr, off_po = self._pos-nbytes, self._pos
             print("Read of %d bytes yields no data" % (nbytes,))
             print("Offset pre-read %s, post-read %s" % (off_pr, off_po))

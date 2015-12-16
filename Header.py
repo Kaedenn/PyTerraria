@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import FileMetadata
+
 CompatibleVersion = 102
 Version147 = 147
 Version140 = 140

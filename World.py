@@ -1,9 +1,17 @@
 #!/usr/bin/env python
 
+"""
+Module for handling Terraria world files
+
+class World:
+    See the World class docstring for usage.
+"""
+
 import copy
 import os
 import sys
-import warnings
+import time
+from warnings import warn
 
 import Header
 from Header import CompatibleVersion, Version147, Version140, Version104, \
@@ -15,11 +23,17 @@ import Tile
 import Chest
 import Entity
 
-VERBOSE_MODE = False
-DEBUG_MODE = False
+class _G(object):
+    def __init__(self):
+        self.VERBOSE_MODE = False
+        self.DEBUG_MODE = False
+
+G = _G()
 
 def verbose(string, *args):
-    if VERBOSE_MODE:
+    "Output string % args if G.VERBOSE_MODE is True"
+    if G.VERBOSE_MODE:
+        sys.stdout.flush()
         if args:
             sys.stderr.write(string % args)
         else:
@@ -27,34 +41,43 @@ def verbose(string, *args):
         sys.stderr.write("\n")
 
 def debug(string, *args):
-    if DEBUG_MODE:
+    "Output string % args if G.DEBUG_MODE is True"
+    if G.DEBUG_MODE:
+        sys.stdout.flush()
         if args:
             sys.stderr.write(string % args)
         else:
             sys.stderr.write(string)
         sys.stderr.write("\n")
 
-def warn(string, *args):
-    warnings.warn(string % args if args else string)
-
-def test_bit(value, bit):
-    return (value & bit) == bit
-
 WORLDPATH_LINUX = os.path.expanduser("~/.local/share/Terraria/Worlds")
+WORLDPATH_WINDOWS = None
 
 class World(object):
-    def _PosToIdx(self, x, y):
-        return y * self._width + x
+    """
+    An object wrapping a Terraria world
 
-    def _IdxToPos(self, idx):
-        return (idx % self._width, int(idx / self._width))
+    World.__init__ parameters:
+        fname       (str) path to a Terraria world file (ending in .wld)
+        fobj        (file) opened file object of a Terraria world file
+        read_only   (bool) if false, allow tile modification (see below)
+        load_tiles  (bool) whether or not to load the world tiles
+        load_chests (bool) whether or not to load the world chests
+        load_signs  (bool) whether or not to load the world signs
+        load_npcs   (bool) whether or not to load the world NPCs
+        load_tents  (bool) whether or not to load the world tile entities
+        progress    (bool) show progress during loading
+        verbose     (bool) show diagnostic information
+        debug       (bool) show even more diagnostic information
 
-    def _ensure_offset(self, offset, or_fatal=False):
-        if or_fatal and self._stream.get_pos() != offset:
-            raise RuntimeError("Stream position %d not at expected offset %d" %
-                               (self._stream.get_pos(), offset))
-        self._stream.seek_set(offset)
-
+    "Read Only" worlds:
+        If read_only=True (the default), then duplicated tiles in a sequence
+        will all be references to the same tile instance, so modifying one
+        tile will modify all of them. This will lead to unexpected side-effects
+        and cause problems.
+        Otherwise, if read_only=False, then all tiles will be individual
+        instances, so modifying one does not modify any others.
+    """
     def __init__(self, fname=None, fobj=None,
                  read_only=True,
                  load_tiles=True,
@@ -62,8 +85,10 @@ class World(object):
                  load_signs=True,
                  load_npcs=True,
                  load_tents=True,
-                 verbose=False, debug=False):
-        global VERBOSE_MODE
+                 progress=False,
+                 verbose=False, debug=False,
+                 progress_delay=0.2):
+        """See the World class or World module docstring"""
         self._readonly = read_only
         self._extents = None
         self._header = None
@@ -74,15 +99,22 @@ class World(object):
         self._npcs = None
         self._width, self._height = 0, 0
         self._extents = [0, 0]
+        self._loaded = False
+        self._last_progress_time = 0
+        self._curr_progress_time = 0
+        self._progress_delay = progress_delay
 
-        VERBOSE_MODE = VERBOSE_MODE or verbose or debug
-        self._debug_enabled = debug
+        G.VERBOSE_MODE = G.VERBOSE_MODE or verbose or debug
+        G.DEBUG_MODE = G.DEBUG_MODE or debug
+        self._last_progress_len = 0
+        self._show_progress = progress
         self._should_load_tiles = load_tiles
         self._should_load_chests = load_chests
         self._should_load_signs = load_signs
         self._should_load_npcs = load_npcs
         self._should_load_tents = load_tents
-        self._start_debug_frame()
+        self._max_progress_len = 0
+        self._last_progress_len = 0
         if fname is not None and fobj is not None:
             raise ValueError("fname and fobj are mutually exclusive")
         if fname is None and fobj is not None:
@@ -90,29 +122,58 @@ class World(object):
         if fname is not None and fobj is None:
             self.Load(open(fname, 'r'))
 
-    def _debug(self, message, *args):
-        if self._debug_enabled:
-            if len(args) > 0:
-                sys.stderr.write(message % args)
-            else:
-                sys.stderr.write(message)
-            sys.stderr.write("\n")
+    def __repr__(self):
+        if self._loaded:
+            return "<Terraria World %r (%d, %d)>" % (self._flags.Title,
+                    self._width, self._height)
+        return super(World, self).__repr__()
 
-    def Open(self, fobj):
-        self._stream = BinaryString.BinaryString(fobj.read(), debug=self._debug_enabled)
+    def _PosToIdx(self, x, y):
+        if 0 <= x < self._width and 0 <= y < self._height:
+            return y * self._width + x
+        raise RuntimeError("Invalid OOB tile position (%s,%s)" % (x, y))
 
-    def _start_debug_frame(self):
-        self._debugging = []
+    def _IdxToPos(self, idx):
+        return (idx % self._width, int(idx / self._width))
 
-    def _add_debug(self, message, *args):
-        if self._debug_enabled:
-            self._debugging.append(message % args)
+    def _ensure_offset(self, offset, or_fatal=False):
+        if or_fatal and self._pos() != offset:
+            raise RuntimeError("Stream position %d not at expected offset %d" %
+                               (self._pos(), offset))
+        self._stream.seek_set(offset)
+
+    def _progress(self, message=None, *args, **kwargs):
+        force = kwargs.get('force', None)
+        if not self._show_progress:
+            return
+        self._curr_progress_time = time.time()
+        delay = self._curr_progress_time - self._last_progress_time
+        if delay < self._progress_delay and not force:
+            return
+        if message is not None:
+            m = message % args if args else str(message)
+            self._max_progress_len = max((len(m), self._max_progress_len))
+            sys.stderr.write(m)
+        sys.stderr.write(" "*self._max_progress_len + "\r")
+        self._last_progress_time = self._curr_progress_time
 
     def _pos(self):
         return self._stream.get_pos()
 
+    def Open(self, fobj=None, fname=None):
+        """Specify the file object or file name to read from. This actually
+        loads the contents of the file into memory."""
+        if fobj is None and fname is not None:
+            fobj = open(fname, 'r')
+        elif fobj is None and fname is None:
+            raise RuntimeError("Must provide either file object or file path")
+        self._stream = BinaryString.BinaryString(fobj.read(),
+                                                 debug=G.DEBUG_MODE)
+
     @staticmethod
     def ListWorlds():
+        """Returns a list of worlds (filename, world, filepath). The world
+        is a valid world instance with the header and world flags loaded."""
         worlds = []
         if os.path.exists(WORLDPATH_LINUX):
             for f in os.listdir(WORLDPATH_LINUX):
@@ -122,24 +183,42 @@ class World(object):
                     w.Open(open(fp, 'r'))
                     w.LoadFileHeader()
                     w.LoadWorldFlags()
-                    worlds.append((f, w.GetWorldFlag('Title'), fp))
+                    worlds.append((f, w, fp))
+        verbose("Discovered %d worlds", len(worlds))
         return worlds
 
     @staticmethod
-    def FindWorld(worldname, failquiet=False):
-        fp = os.path.join(WORLDPATH_LINUX, worldname + ".wld")
-        if os.path.exists(fp):
-            return fp
-        for fn, title, fp in World.ListWorlds():
-            if worldname == title:
-                return fp
+    def FindWorld(worldname=None, worldid=None, failquiet=False, doopen=False):
+        """Returns the file path to the world specified, either by file name
+        (without .wld suffix), world name as seen in-game, or world ID. Raises
+        an exception if no matching world is found, unless @param failquiet is
+        True.
+        
+        If @param doopen is True, return an opened file object."""
+        if worldname is None and worldid is None:
+            raise RuntimeError("must provide either worldname or worldid")
+        if worldname is not None:
+            fp = os.path.join(WORLDPATH_LINUX, worldname + ".wld")
+            if os.path.exists(fp):
+                return open(fp, 'r') if doopen else fp
+        for fn, w, fp in World.ListWorlds():
+            if worldname is not None and worldname == w.GetWorldFlag('Title'):
+                return open(fp, 'r') if doopen else fp
+            elif worldid is not None and worldid == w.GetWorldFlag('WorldId'):
+                return open(fp, 'r') if doopen else fp
         if not failquiet:
             raise RuntimeError("World %s not found" % (worldname,))
+        verbose("No world matching (n=%r, id=%r) found", worldname, worldid)
 
     def Load(self, fobj=None):
+        """Loads the world given by @param fobj (if present) or the value of
+        @param fname or @param fobj passed to __init__.
+
+        Use the arguments to __init__ to suppress loading certain sections.
+        """
         if fobj is not None:
             self._stream = BinaryString.BinaryString(fobj.read(),
-                    debug=self._debug_enabled)
+                                                     debug=G.DEBUG_MODE)
         # Populate self._header
         self.LoadFileHeader()
 
@@ -149,37 +228,58 @@ class World(object):
         verbose("Chest data size: %s" % (offsets[3] - offsets[2],))
         verbose("Sign data size: %s" % (offsets[4] - offsets[3],))
 
+        self._progress("Loading world flags")
         assert self._pos() == self._header.GetFlagsPointer()
-        # Populate self._flags
         self.LoadWorldFlags()
         assert self._pos() == self._header.GetTilesPointer()
         self._width = self._flags.TilesWide
         self._height = self._flags.TilesHigh
         self._extents = [self._flags.TilesWide, self._flags.TilesHigh]
         if self._should_load_tiles:
-            # Populate self._tiles
+            self._progress("Loading tiles...")
             self.LoadTiles(self._flags.TilesWide, self._flags.TilesHigh)
             assert self._pos() == self._header.GetChestsPointer()
         else:
             self._stream.seek_set(self._header.GetChestsPointer())
         if self._should_load_chests:
+            self._progress("Loading chests...")
             self.LoadChests()
             assert self._pos() == self._header.GetSignsPointer()
         else:
             self._stream.seek_set(self._header.GetSignsPointer())
         if self._should_load_signs:
+            self._progress("Loading signs...")
             self.LoadSigns()
             assert self._pos() == self._header.GetNPCsPointer()
         else:
             self._stream.seek_set(self._header.GetNPCsPointer())
-        self.LoadNPCs()
+        if self._should_load_npcs:
+            self._progress("Loading NPCs...")
+            self.LoadNPCs()
+        else:
+            self._stream.seek_set(self._header.GetTileEntitiesPointer())
         if self._header.Version >= Version140:
-            assert self._pos() == self._header.GetTileEntitiesPointer()
-            self.LoadTileEntities()
+            if self._should_load_tents:
+                assert self._pos() == self._header.GetTileEntitiesPointer()
+                self._progress("Loading tile entities...")
+                self.LoadTileEntities()
+            else:
+                self._stream.seek_set(self._header.GetFooterPointer())
         assert self._pos() == self._header.GetFooterPointer()
+        self._progress("Loading footer")
         self.LoadFooter()
+        verbose("Loaded footer: %s", self._footer)
+        if not self._footer['Loaded']:
+            warn("Invalid footer detected!")
+        if self._footer['Title'] != self.GetWorldFlag('Title'):
+            warn("Footer title %r does not match header title %r" % (
+                self._footer['Title'], self.GetWorldFlag('Title')))
+        if self._footer['WorldID'] != self.GetWorldFlag('WorldId'):
+            warn("Footer ID %s does not match header ID %s" % (
+                self._footer['WorldID'], self.GetWorldFlag('WorldId')))
+        self._progress(force=True)
 
-        if self._debug_enabled:
+        if G.DEBUG_MODE:
             stats = self._stream.getReadStats().items()
             stats.sort()
             print("Read statistics (size, number of times read):")
@@ -204,6 +304,7 @@ class World(object):
             header.SectionPointers[i] = stream.readUInt32()
         header.ImportantTiles = stream.readBitArray()
         self._header = header
+        self._loaded = True
 
     def LoadWorldFlags(self, stream=None):
         if stream is None:
@@ -213,7 +314,9 @@ class World(object):
         self._ensure_offset(self._header.GetFlagsPointer())
         flags = WorldFlags(self._header.Version)
         flags.Title = stream.readString()
-        for flag in WorldFlags.Flags:
+        num_flags = len(WorldFlags.Flags)
+        for i, flag in enumerate(WorldFlags.Flags):
+            self._progress("Loading world flags... %d/%d", i, num_flags)
             name, typename, ver = flag
             if ver > self._header.Version:
                 verbose("Skipping %s due to version mismatch" % (name,))
@@ -234,13 +337,11 @@ class World(object):
                 value = BinaryString.ScalarReaderLookup[typename](stream)
                 verbose("flag %s == 0x%x (%d)" % (name, value, value))
                 if name.startswith('OreTier'):
-                    try:
-                        verbose("flag %s = 0x%x (%s)" % (name, value,
-                                                         IDs.TileID[value]))
-                    except KeyError as e:
-                        # If the value is not a valid tile, then we're not in
-                        # hard mode yet
-                        assert not flags.getFlag('HardMode')
+                    if IDs.valid_tile(value):
+                        verbose("flag %s = 0x%x (%d %s)" % (name, value, value,
+                            IDs.TileID[value]))
+                    elif flags.getFlag('HardMode'):
+                        warn("Bad ore tier: %s, %s" % (name, value))
                 flags.setFlag(name, value)
         self._width = flags.TilesWide
         self._height = flags.TilesHigh
@@ -285,6 +386,9 @@ class World(object):
         while x < w and self._pos() < end:
             y = 0
             while y < h and self._pos() < end:
+                bytes_loaded = self._pos() - start
+                self._progress("Loading tiles... %d/%d %d%%",
+                        bytes_loaded-start, size, bytes_loaded*100/size)
                 i = self._PosToIdx(x, y)
                 tile, rle = Tile.FromStream(self._stream, important)
                 nloaded += 1
@@ -323,6 +427,7 @@ class World(object):
             itemsPerChest = Chest.MAX_ITEMS
             overflowItems = maxItems - Chest.MAX_ITEMS
         for i in range(totalChests):
+            self._progress("Loading chests... %d/%d", i, totalChests)
             x = self._stream.readInt32()
             y = self._stream.readInt32()
             name = self._stream.readString()
@@ -349,12 +454,13 @@ class World(object):
         signs = []
         totalSigns = self._stream.readInt16()
         for i in range(totalSigns):
+            self._progress("Loading signs... %d/%d", i, totalSigns)
             text = self._stream.readString()
-            self._debug("Sign text: %s" % (text,))
+            debug("Sign text: %s" % (text,))
             x = self._stream.readInt32()
             y = self._stream.readInt32()
             verbose("Loaded sign (%d, %d): %s", x, y, repr(text))
-            self._debug("Offset: %d", self._pos())
+            debug("Offset: %d", self._pos())
             signs.append((x, y, text))
         verbose("Loaded %d total signs", totalSigns)
         self._signs = signs
@@ -395,6 +501,7 @@ class World(object):
         tents = []
         count = self._stream.readInt32()
         for i in range(count):
+            self._progress("Loading tile entities... %d/%d", i, count)
             tent = None
             type_ = self._stream.readByte()
             id_ = self._stream.readInt32()
@@ -403,13 +510,15 @@ class World(object):
             pos = (pos_x, pos_y)
             if type_ == Entity.ENTITY_DUMMY:
                 npc = self._stream.readInt16()
-                tent = Entity.DummyTileEntity(type=type_, id=id_, pos=pos, npc=npc)
+                tent = Entity.DummyTileEntity(type=type_, id=id_, pos=pos,
+                                              npc=npc)
             elif type_ == Entity.ENTITY_ITEM_FRAME:
                 item = self._stream.readInt16()
                 prefix = self._stream.readByte()
                 stack = self._stream.readInt16()
                 tent = Entity.ItemFrameTileEntity(type=type_, id=id_, pos=pos,
-                        item=item, prefix=prefix, stack=stack)
+                                                  item=item, prefix=prefix,
+                                                  stack=stack)
             verbose("Loaded tile entity: %s", tent)
             tents.append(tent)
         self._tents = tents
@@ -425,22 +534,95 @@ class World(object):
     def GetHeader(self):
         return self._header
 
-    def EachTile(self):
-        "Returns an iterable of (row, col, Tile) for each tile"
-        for y in xrange(self._height):
-            for x in xrange(self._width):
-                yield y, x, self._tiles[self._PosToIdx(x, y)]
+    def EachTile(self, rowcol=True, unreachable=True, progress=None):
+        """Returns an iterable of (row, col, Tile) for each tile
+        @param rowcol (default: True)
+            If false, result is an iterable of (col, row, Tile), aka (x, y, t)
+        @param unreachable (default: True)
+            If false, omit unreachable tiles (outer 40 tiles)
+        """
+        ymin = 0 if unreachable else 40
+        xmin = 0 if unreachable else 40
+        ymax = self._height if unreachable else self._height - 40
+        xmax = self._width if unreachable else self._width - 40
+        total = (xmax-xmin)*(ymax-ymin)
+        curr = 0
+        for y in xrange(ymin, ymax):
+            for x in xrange(xmin, xmax):
+                if progress is not None:
+                    curr += 1
+                    self._progress("%s %d/%d %d%%" % (progress, curr,
+                        total, curr*100/total))
+                if rowcol:
+                    yield y, x, self._tiles[self._PosToIdx(x, y)]
+                else:
+                    yield x, y, self._tiles[self._PosToIdx(x, y)]
+
+    def Width(self):
+        return self._width
+
+    def Height(self):
+        return self._height
 
     def GetTile(self, i, j):
+        "Return the Tile object at x=i, y=j"
+        if not (0 <= i < self._width) or not (0 <= j < self._height):
+            raise IndexError("(%d,%d) must be between (0, 0) and (%d, %d)" %
+                    (i, j, self._width, self._height))
         return self._tiles[self._PosToIdx(i, j)]
 
+    def GetTiles(self, rows, cols):
+        """Return all tiles in rows, cols:
+        @param rows - an iterable of rows to get
+        @param cols - an iterable of cols to get"""
+        for r in rows:
+            for c in cols:
+                yield self._tiles[self._PosToIdx(c, r)]
+
+    def __getitem__(self, idx):
+        r, c = Ellipsis, Ellipsis
+        try:
+            r, c = idx
+        except (TypeError, ValueError) as e:
+            raise ValueError("__getitem__ requires a pair (r,c)", e)
+        rows = [r]
+        cols = [c]
+        if r == Ellipsis:
+            rows = range(self._height)
+        elif isinstance(r, slice):
+            start = r.start if r.start is not None else 0
+            stop = r.stop if r.stop is not None else self._height
+            step = r.step if r.step is not None else 1
+            rows = range(start, stop, step)
+        elif r < 0:
+            while r < 0:
+                r = self._height + r
+            rows = [r]
+        if c == Ellipsis:
+            cols = range(self._width)
+        elif isinstance(c, slice):
+            start = c.start if c.start is not None else 0
+            stop = c.stop if c.stop is not None else self._width
+            step = c.step if c.step is not None else 1
+            cols = range(start, stop, step)
+        elif c < 0:
+            while c < 0:
+                c = self._width + c
+            cols = [c]
+        verbose("Returning %d tiles", len(rows)*len(cols))
+        if len(rows) == 1 and len(cols) == 1:
+            return self._tiles[self._PosToIdx(cols[0], rows[0])]
+        return self.GetTiles(rows, cols)
+
     def GetWorldFlags(self):
+        "Return a tuple of (flagName, flagValue)"
         flags = []
         for flag, _, _ in WorldFlags.Flags:
             flags.append((flag, self._flags.getFlag(flag)))
         return tuple(flags)
 
     def GetWorldFlag(self, flag):
+        "Return the value of @param flag"
         return self._flags.getFlag(flag)
 
     def GetNPCs(self):
@@ -450,6 +632,7 @@ class World(object):
         return self._tents
 
     def CountTiles(self):
+        "Returns a dict of numeric tile type to frequency counts"
         counts = {}
         for tile in self._tiles:
             if tile is not None and tile.IsActive:
@@ -457,5 +640,6 @@ class World(object):
                     counts[tile.Type] = 1
                 else:
                     counts[tile.Type] += 1
+        verbose("Active tile types: %d", len(counts.keys()))
         return counts
 

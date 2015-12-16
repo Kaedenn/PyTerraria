@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 
+EXPR_MAX_TERMS = 4
+
 TOK_EXPRSEP = ';'
 TOK_TERMSEP = ','
 TOK_RANGE   = '-'
 TOK_NONE    = "None"
 
-class MatchSyntaxError(RuntimeError):
+class MatchError(RuntimeError):
+    def __init__(self, *args, **kwargs):
+        super(MatchError, self).__init__(*args, **kwargs)
+
+class MatchSyntaxError(MatchError):
     def __init__(self, *args, **kwargs):
         super(MatchSyntaxError, self).__init__(*args, **kwargs)
 
@@ -23,8 +29,8 @@ Expr(Nothing(), TermSet(44, 88)) -> [], [44, 88], []
     def Nothing():
         return TOK_NONE
     @staticmethod
-    def Expr(t1=None, t2=None, t3=None):
-        return TOK_EXPRSEP.join((str(t1), str(t2), str(t3)))
+    def Expr(*ts):
+        return TOK_EXPRSEP.join((str(ti) for ti in ts))
     @staticmethod
     def TermSet(*args):
         return TOK_TERMSEP.join(str(arg) for arg in args)
@@ -39,7 +45,7 @@ Match(expr, names=None) -> sequence of integers
 Parses @param expr and returns an iterable of integers specified by the
 expression. The expression has the grammar:
 
-Expr := TermSet (';' TermSet (';' TermSet))
+Expr := TermSet (';' TermSet (';' TermSet (';' TermSet)))
 
 TermSet := Term (',' Term)*
 Term := Number | Number '-' Number | "None" | ""
@@ -54,16 +60,17 @@ The @param names is an optional dictionary of strings to numbers. The
 Number token, if not a valid number, is passed through the dictionary
 to find a value.
 """
-    def __init__(self, expr, names=None):
+    def __init__(self, expr, names=None, max_terms=EXPR_MAX_TERMS, **kwargs):
+        self._max_terms = max_terms
         self._raw_expr = expr
         self._names = {} if names is None else names
         self._expr = self._parse_match(expr)
 
     def _parse_match(self, expr):
         parts = expr.split(TOK_EXPRSEP)
-        if len(parts) > 3:
+        if len(parts) > self._max_terms:
             raise MatchSyntaxError("Expression %s has too many parts" % (expr,))
-        while len(parts) < 3:
+        while len(parts) < self._max_terms:
             parts.append(None)
         return tuple(self._parse_part(p) for p in parts)
 
@@ -92,20 +99,32 @@ to find a value.
     def extract(self):
         return self._expr
 
-    def match(self, v1, v2=None, v3=None):
-        for p,v in zip(self._expr, (v1, v2, v3)):
+    def match(self, v1, *vs):
+        terms = [v1] + list(vs)
+        if len(terms) > self._max_terms:
+            raise MatchError("Too many terms passed to match()")
+        while len(terms) < self._max_terms:
+            terms.append(None)
+        for p,v in zip(self._expr, tuple(terms)):
             if p is not None and v not in p:
                 return False
         return True
 
-def _do_test(expr, r1=None, r2=None, r3=None, names=None):
+def _do_test(expr, *rs, **kwargs):
+    names = kwargs.get("names", None)
     m = Match(expr, names)
-    p1, p2, p3 = m.extract()
-    print("%s -> %s %s %s" % (expr, p1, p2, p3))
-    assert (p1 == r1), "test %s result 1 %s != %s" % (expr, p1, r1)
-    assert (p2 == r2), "test %s result 2 %s != %s" % (expr, p2, r2)
-    assert (p3 == r3), "test %s result 3 %s != %s" % (expr, p3, r3)
-    print("PASS")
+    rs = list(rs)
+    while len(rs) < EXPR_MAX_TERMS:
+        rs.append(None)
+    ps = m.extract()
+    assert len(ps) == EXPR_MAX_TERMS, "length %d not expected %d" % (
+            len(ps), EXPR_MAX_TERMS)
+    ps = m.extract()
+    assert len(ps) == len(rs), "length given %d not received %d" % (
+            len(ps), len(rs))
+    for r,p in zip(rs, ps):
+        assert r == p, "test %s match %s != result %s" % (expr, r, p)
+    print("%s (%s) PASS" % (expr, rs))
 
 if __name__ == "__main__":
     # test trivial
@@ -116,6 +135,8 @@ if __name__ == "__main__":
     _do_test("1;2", [1], [2])
     # test three
     _do_test("1;2;3", [1], [2], [3])
+    # test four
+    _do_test("1;2;3;4", [1], [2], [3], [4])
     # test pair
     _do_test("1,2", [1, 2])
     # test two pairs

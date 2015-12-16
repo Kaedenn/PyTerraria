@@ -37,6 +37,8 @@ def _MakeNamesClass(table):
     class Lookup(object):
         def __init__(self, t):
             self._table = t
+            for k,v in self._table.iteritems():
+                setattr(self, k, v)
         def __getattr__(self, attr):
             return self._table[attr]
     return Lookup(table)
@@ -88,6 +90,10 @@ Frames = {
         'Min': 21,      # First mob banner is index 21
         'Stride': 90    # Difference in IDs between two rows
     },
+    'Statues': {
+        'Width': FRAME_WIDTH,
+        'Height': 2*FRAME_WIDTH
+    }
 }   # Frames
 
 Prefixes = {
@@ -6715,6 +6721,8 @@ WallID, Walls = _MakeIDNameLookup({
     "Count": 225
 })  # WallID, Walls
 
+Wall = _MakeNamesClass(Walls)
+
 NPCToBanner = {
     1: 69,
     2: 25,
@@ -7436,12 +7444,263 @@ def _identify_Banners(tile, u, v):
         offset -= Frames['Banners']['RowSize']
     return idx
 
+def _identify_Statues(tile, u, v):
+    """
+    int num6 = frameX / 36;
+    int Type;
+    switch (num6)
+    {
+      case 0:
+        Type = 360;
+        break;
+      case 1:
+        Type = 52;
+        break;
+      case 43:
+        Type = 1152;
+        break;
+      case 44:
+        Type = 1153;
+        break;
+      case 45:
+        Type = 1154;
+        break;
+      case 46:
+        Type = 1408;
+        break;
+      case 47:
+        Type = 1409;
+        break;
+      case 48:
+        Type = 1410;
+        break;
+      case 49:
+        Type = 1462;
+        break;
+      case 50:
+        Type = 2672;
+        break;
+      default:
+        Type = 438 + num6 - 2;
+        break;
+    }
+    """
+    idx = u / Frames['Statues']['Width']
+
 def tile_to_item(tile, u, v, noexcept=False):
     "Returns an item equivalent to the tile passed"
-    known = { }
+    known = {Tile.ActiveStoneBlock: Item.ActiveStoneBlock,
+             Tile.Adamantite: Item.AdamantiteOre,
+             Tile.AdamantiteBeam: Item.AdamantiteBeam,
+             Tile.Ash: Item.AshBlock,
+             Tile.Asphalt: Item.AsphaltBlock,
+             Tile.BlueDungeonBrick: Item.BlueBrick,
+             Tile.BlueDynastyShingles: Item.BlueDynastyShingles,
+             Tile.BoneBlock: Item.BoneBlock,
+             Tile.BorealWood: Item.BorealWood,
+             Tile.Bubble: Item.Bubble,
+             Tile.BubblegumBlock: Item.BubblegumBlock,
+             Tile.Cactus: Item.Cactus,
+             Tile.CactusBlock: Item.Cactus,
+             Tile.CandyCaneBlock: Item.CandyCaneBlock,
+             Tile.Chain: Item.Chain,
+             Tile.ChimneySmoke: Item.SmokeBlock,
+             Tile.Chlorophyte: Item.ChlorophyteOre,
+             Tile.ChlorophyteBrick: Item.ChlorophyteBrick,
+             Tile.ClayBlock: Item.ClayBlock,
+             Tile.ClayPot: Item.ClayPot,
+             Tile.Cloud: Item.Cloud,
+             Tile.Cobalt: Item.CobaltOre,
+             Tile.CobaltBrick: Item.CobaltBrick,
+             Tile.Cobweb: Item.Cobweb,
+             Tile.Cog: Item.Cog,
+             Tile.Confetti: Item.ConfettiBlock,
+             Tile.ConfettiBlack: Item.ConfettiBlockBlack,
+             Tile.Copper: Item.CopperOre,
+             Tile.CopperBrick: Item.CopperBrick,
+             Tile.CopperCoinPile: Item.CopperCoin,
+             Tile.CopperPlating: Item.CopperPlating,
+             Tile.Coral: Item.Coral,
+             Tile.Coralstone: Item.CoralstoneBlock,
+             Tile.CorruptGrass: Item.EbonstoneBlock,
+             Tile.CorruptHardenedSand: Item.CorruptHardenedSand,
+             Tile.CorruptIce: Item.PurpleIceBlock,
+             Tile.CorruptSandstone: Item.CorruptSandstone,
+             Tile.Crimsand: Item.CrimsandBlock,
+             Tile.CrimsonHardenedSand: Item.CrimsonHardenedSand,
+             Tile.CrimsonSandstone: Item.CrimsonSandstone,
+             Tile.Crimstone: Item.CrimstoneBlock,
+             Tile.Crimtane: Item.CrimtaneOre,
+             Tile.CrimtaneBrick: Item.CrimtaneBrick,
+             Tile.CrispyHoneyBlock: Item.CrispyHoneyBlock,
+             Tile.CrystalBlock: Item.CrystalBlock,
+             Tile.Crystals: Item.CrystalShard,
+             Tile.Demonite: Item.DemoniteOre,
+             Tile.DemoniteBrick: Item.DemoniteBrick,
+             Tile.DesertFossil: Item.DesertFossil,
+             Tile.Dirt: Item.DirtBlock,
+             Tile.DynastyWood: Item.DynastyWood,
+             Tile.Ebonsand: Item.EbonsandBlock,
+             Tile.EbonstoneBrick: Item.EbonstoneBrick,
+             Tile.Ebonwood: Item.Ebonwood,
+             Tile.Explosives: Item.Explosives,
+             Tile.FleshBlock: Item.FleshBlock,
+             Tile.FleshIce: Item.RedIceBlock,
+             Tile.FossilOre: Item.FossilOre,
+             Tile.FrozenSlimeBlock: Item.FrozenSlimeBlock,
+             Tile.Glass: Item.Glass,
+             Tile.Gold: Item.GoldOre,
+             Tile.GoldBrick: Item.GoldBrick,
+             Tile.GoldCoinPile: Item.GoldCoin,
+             Tile.Granite: Item.Granite,
+             Tile.GraniteBlock: Item.GraniteBlock,
+             Tile.Grass: Item.DirtBlock,
+             Tile.GrayBrick: Item.GrayBrick,
+             Tile.GrayStucco: Item.GrayStucco,
+             Tile.GreenCandyCaneBlock: Item.GreenCandyCaneBlock,
+             Tile.GreenDungeonBrick: Item.GreenBrick,
+             Tile.GreenStucco: Item.GreenStucco,
+             Tile.HallowHardenedSand: Item.HallowHardenedSand,
+             Tile.HallowSandstone: Item.HallowSandstone,
+             Tile.HallowedGrass: Item.DirtBlock,
+             Tile.HallowedIce: Item.PinkIceBlock,
+             Tile.HardenedSand: Item.HardenedSand,
+             Tile.HayBlock: Item.Hay,
+             Tile.Hellstone: Item.Hellstone,
+             Tile.HellstoneBrick: Item.HellstoneBrick,
+             Tile.HoneyBlock: Item.HoneyBlock,
+             Tile.Honeyfall: Item.HoneyfallBlock,
+             Tile.IceBlock: Item.IceBlock,
+             Tile.IceBrick: Item.IceBrick,
+             Tile.InactiveStoneBlock: Item.InactiveStoneBlock,
+             Tile.IridescentBrick: Item.IridescentBrick,
+             Tile.Iron: Item.IronOre,
+             Tile.JungleGrass: Item.MudBlock,
+             Tile.LandMine: Item.LandMine,
+             Tile.Lavafall: Item.LavafallBlock,
+             Tile.Lead: Item.LeadOre,
+             Tile.LihzahrdBrick: Item.LihzahrdBrick,
+             Tile.LivingCursedFire: Item.LivingCursedFireBlock,
+             Tile.LivingDemonFire: Item.LivingDemonFireBlock,
+             Tile.LivingFire: Item.LivingFireBlock,
+             Tile.LivingFrostFire: Item.LivingFrostFireBlock,
+             Tile.LivingIchor: Item.LivingIchorBlock,
+             Tile.LivingMahogany: Item.RichMahogany,
+             Tile.LivingUltrabrightFire: Item.LivingUltrabrightFireBlock,
+             Tile.LivingWood: Item.Wood,
+             Tile.LunarBlockSolar: Item.LunarBlockSolar,
+             Tile.LunarBrick: Item.LunarBrick,
+             Tile.LunarOre: Item.LunarOre,
+             Tile.Marble: Item.Marble,
+             Tile.MarbleBlock: Item.MarbleBlock,
+             Tile.MartianConduitPlating: Item.MartianConduitPlating,
+             Tile.Meteorite: Item.Meteorite,
+             Tile.MeteoriteBrick: Item.MeteoriteBrick,
+             Tile.Mudstone: Item.MudstoneBlock,
+             Tile.MushroomBlock: Item.GlowingMushroom,
+             Tile.MushroomGrass: Item.MudBlock,
+             Tile.Mythril: Item.MythrilOre,
+             Tile.MythrilBrick: Item.MythrilBrick,
+             Tile.Obsidian: Item.Obsidian,
+             Tile.ObsidianBrick: Item.ObsidianBrick,
+             Tile.Orichalcum: Item.OrichalcumOre,
+             Tile.Palladium: Item.PalladiumOre,
+             Tile.PalladiumColumn: Item.PalladiumColumn,
+             Tile.PalmWood: Item.PalmWood,
+             Tile.PeaceCandle: Item.PeaceCandle,
+             Tile.Pearlsand: Item.PearlsandBlock,
+             Tile.Pearlstone: Item.PearlstoneBlock,
+             Tile.PearlstoneBrick: Item.PearlstoneBrick,
+             Tile.Pearlwood: Item.Pearlwood,
+             Tile.PineTree: Item.PineTreeBlock,
+             Tile.PinkDungeonBrick: Item.PinkBrick,
+             Tile.PinkSlimeBlock: Item.PinkSlimeBlock,
+             Tile.Platinum: Item.PlatinumOre,
+             Tile.PlatinumBrick: Item.PlatinumBrick,
+             Tile.PlatinumCandle: Item.PlatinumCandle,
+             Tile.PlatinumCoinPile: Item.PlatinumCoin,
+             Tile.Presents: Item.Present,
+             Tile.PumpkinBlock: Item.Pumpkin,
+             Tile.RainCloud: Item.RainCloud,
+             Tile.RainbowBrick: Item.RainbowBrick,
+             Tile.RedBrick: Item.RedBrick,
+             Tile.RedDynastyShingles: Item.RedDynastyShingles,
+             Tile.RedStucco: Item.RedStucco,
+             Tile.RichMahogany: Item.RichMahogany,
+             Tile.Rope: Item.Rope,
+             Tile.Sand: Item.SandBlock,
+             Tile.SandStoneSlab: Item.SandstoneSlab,
+             Tile.Sandstone: Item.Sandstone,
+             Tile.SandstoneBrick: Item.SandstoneBrick,
+             Tile.Shadewood: Item.Shadewood,
+             Tile.ShroomitePlating: Item.ShroomitePlating,
+             Tile.SilkRope: Item.SilkRope,
+             Tile.Silt: Item.SiltBlock,
+             Tile.Silver: Item.SilverOre,
+             Tile.SilverBrick: Item.SilverBrick,
+             Tile.SilverCoinPile: Item.SilverCoin,
+             Tile.SlimeBlock: Item.SlimeBlock,
+             Tile.Slush: Item.SlushBlock,
+             Tile.SnowBlock: Item.SnowBlock,
+             Tile.SnowBrick: Item.SnowBrick,
+             Tile.Spikes: Item.Spike,
+             Tile.SpookyWood: Item.SpookyWood,
+             Tile.Stone: Item.StoneBlock,
+             Tile.StoneSlab: Item.StoneSlab,
+             Tile.Sunplate: Item.SunplateBlock,
+             Tile.Switches: Item.Switch,
+             Tile.Tin: Item.TinOre,
+             Tile.TinBrick: Item.TinBrick,
+             Tile.TinPlating: Item.TinPlating,
+             Tile.Titanium: Item.TitaniumOre,
+             Tile.Titanstone: Item.TitanstoneBlock,
+             Tile.Tungsten: Item.TungstenOre,
+             Tile.TungstenBrick: Item.TungstenBrick,
+             Tile.VineRope: Item.VineRope,
+             Tile.WaterCandle: Item.WaterCandle,
+             Tile.Waterfall: Item.WaterfallBlock,
+             Tile.WebRope: Item.WebRope,
+             Tile.WoodenBeam: Item.WoodenBeam,
+             Tile.WoodenSpikes: Item.WoodenSpike,
+             Tile.YellowStucco: Item.YellowStucco}
     for gem in ('Sapphire', 'Ruby', 'Emerald', 'Topaz', 'Amethyst', 'Diamond'):
         known[Tiles[gem]] = Items[gem]
+    for i in range(Tile.AmethystGemsparkOff, Tile.AmberGemsparkOff+1):
+        known[i] = 1970 + i - 255
+    for i in range(Tile.AmethystGemspark, Tile.AmberGemspark+1):
+        known[i] = 1970 + i - 262
+    for i in range(Tile.Sapphire, Tile.Diamond+1):
+        known[i] = 177 + i - 63
+
+    known[Tile.Plants] = known[Tile.Plants2] = Item.Seed
+    known[Tile.Ebonstone] = known[Tile.LivingWood] = Item.Wood
+    known[Tile.Vines] = known[Tile.JungleVines] = Item.VineRope # if player.cordage
+    known[Tile.Mud] = known[Tile.JungleGrass] = Item.MudBlock
+    known[Tile.LunarBlockVortex] = known[Tile.LunarBlockSolar] + 1
+    known[Tile.LunarBlockNebula] = known[Tile.LunarBlockVortex] + 1
+    known[Tile.LunarBlockStardust] = known[Tile.LunarBlockNebula] + 1
+    if os.getenv('IDS_DUMP_KNOWN'):
+        return known
+    no_lookup = lambda *args: None
     lookups = {
+        Tiles['Torches']: no_lookup,
+        Tiles['MetalBars']: no_lookup,
+        Tiles['Trees']: no_lookup,
+        Tiles['PalmTree']: no_lookup,
+        Tiles['ChristmasTree']: no_lookup,
+        Tiles['BeachPiles']: no_lookup,
+        Tiles['Hive']: no_lookup,
+        Tiles['HolidayLights']: no_lookup,
+        Tiles['Platforms']: no_lookup,
+        Tiles['Candles']: no_lookup,
+        Tiles['Traps']: no_lookup,
+        Tiles['PressurePlates']: no_lookup,
+        Tiles['Timers']: no_lookup,
+        Tiles['JunglePlants']: no_lookup,
+        Tiles['JunglePlants2']: no_lookup,
+        Tiles['MushroomPlants']: no_lookup,
+        Tiles['MushroomTrees']: no_lookup,
+        #Tiles.Herbs
         Tiles['ExposedGems']: _identify_ExposedGems,
         Tiles['SmallPiles']: _identify_SmallPiles,
         Tiles['DyePlants']: _identify_DyePlants,
@@ -7454,6 +7713,12 @@ def tile_to_item(tile, u, v, noexcept=False):
     if not noexcept:
         raise ValueError("Tile %s not known" % (tile,))
     return INVALID
+
+def valid_tile(tile):
+    return tile in TileID
+
+def valid_item(item):
+    return item in ItemID
 
 def strtoint(string, base):
     if base is None:
