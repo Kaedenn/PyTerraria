@@ -75,7 +75,9 @@ def _make_reader(t, scalar=True, bounds=None):
     typeid, nbytes = t
     ts = "<%s" % (typeid,)
     def reader(self):
-        bytevals = struct.unpack(ts, self._next(nbytes))
+        bytevals = struct.unpack_from(ts, self._content, offset=self._pos)
+        self._pos += nbytes
+        #bytevals = struct.unpack(ts, self._next(nbytes))
         return bytevals[0] if scalar else bytevals
     reader.__doc__ = "Reads %d byte%s as a little-endian %s type" % (
             nbytes, "" if nbytes == 1 else "s", TypeNames[t])
@@ -87,7 +89,7 @@ def _make_reader(t, scalar=True, bounds=None):
                 raise DataError("Value %s not between [%s,%s]" % (value, low,
                     high))
             return value
-        checker.__doc__ = reader.__doc__ + " (bound to [%s, %s])" % (low, high)
+        checker.__doc__ = reader.__doc__ + " (between [%s,%s])" % (low, high)
         return checker
     return reader
 
@@ -139,19 +141,19 @@ class BinaryString(object):
 
     ScalarReaderLookup = dict(zip(Types, ScalarReaders))
 
-    def __init__(self, data, verbose=False, debug=False):
+    def __init__(self, data, verbose=False, debug=False, asis=False):
         """Creates a BinaryString instance.
-        Parameters:
-          string - a string-like buffer supporting subscript and slicing
-          verbose - output progress/debugging information (default=False)
+        @param data - either a file-like object or a string-like object
+        @param verbose - output progress/debugging information (default=False)
+        @param debug - store information on the frequency of sizes read
+        @param asis - do not call read() even if it exists
+
+        If @param data has a read() method, it is called and the result is
+        stored instead (unless asis=True).
         """
-        if hasattr(data, 'read'):
+        self._content = data
+        if hasattr(data, 'read') and not asis:
             self._content = data.read()
-        elif isinstance(data, basestring):
-            self._content = data
-        else:
-            # TODO: warn?
-            self._content = data
         self._pos = 0
         self._verbose_on = verbose
         self._debug_on = debug
@@ -164,14 +166,9 @@ class BinaryString(object):
             else:
                 self._debug_counts[nbytes] += 1
 
-    def _verbose(self, string, *args, **kwargs):
+    def _verbose(self, string, *args):
         if self._verbose_on:
-            if args:
-                print(string % args)
-            else:
-                print(string)
-            if kwargs:
-                print(kwargs)
+            print(string % args if args else string)
 
     def _next(self, nbytes):
         result = self._content[self._pos:self._pos+nbytes]
@@ -198,6 +195,7 @@ class BinaryString(object):
             self._pos = len(self._content)
 
     def getReadStats(self):
+        "If __init__(debug=True), returns debugging counts"
         return self._debug_counts
 
     def seek(self, nbytes, whence=os.SEEK_CUR):
@@ -243,7 +241,7 @@ class BinaryString(object):
         if length is None:
             length = self.readPacked7Int()
         return self._next(length) if length > 0 else ''
-    
+
     def readPacked7Int(self):
         """Reads a packed 7-bit integer.
         See module docstring for an explanation on 7-bit packed integers"""

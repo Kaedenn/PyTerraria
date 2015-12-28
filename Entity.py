@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import IDs
+
 ENTITY_DUMMY = 0
 ENTITY_ITEM_FRAME = 1
 
@@ -45,12 +47,14 @@ class NPCEntity(Entity):
         super_.Set(NPCEntity.ATTR_HOME, home)
 
     def __str__(self):
-        return "NPC '%s the %s' at %s: Home: %s, Homeless: %s" % (
-                self.Get(NPCEntity.ATTR_DISPNAME),
-                self.Get(NPCEntity.ATTR_NAME),
-                self.Position,
-                self.Get(NPCEntity.ATTR_HOME),
-                self.Get(NPCEntity.ATTR_HOMELESS))
+        s = "NPC '%s the %s' at %s: Home: %s" % (
+            self.Get(NPCEntity.ATTR_DISPNAME),
+            self.Get(NPCEntity.ATTR_NAME),
+            self.Position,
+            self.Get(NPCEntity.ATTR_HOME))
+        if self.Get(NPCEntity.ATTR_HOMELESS):
+            s += ", Homeless"
+        return s
 
 class MobEntity(Entity):
     ATTR_NAME = "Name"
@@ -96,9 +100,14 @@ class ItemFrameTileEntity(Entity):
         super_.Set(ItemFrameTileEntity.ATTR_STACK, stack)
 
     def __str__(self):
-        return "ItemFrame at %s: ID %s, Item %s, Prefix %s, Stack %s" % (
+        item = IDs.ItemID[self.Get(ItemFrameTileEntity.ATTR_ITEM)]
+        if item == 'None':
+            return "ItemFrame at %s: ID %s" % (
+                    self.Position,
+                    self.Get(ItemFrameTileEntity.ATTR_ID))
+        return "ItemFrame at %s: ID %s, Item %s %s, Prefix %s, Stack %s" % (
                 self.Position, self.Get(ItemFrameTileEntity.ATTR_ID),
-                self.Get(ItemFrameTileEntity.ATTR_ITEM),
+                self.Get(ItemFrameTileEntity.ATTR_ITEM), item,
                 self.Get(ItemFrameTileEntity.ATTR_PREFIX),
                 self.Get(ItemFrameTileEntity.ATTR_STACK))
 

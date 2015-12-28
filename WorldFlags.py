@@ -129,9 +129,9 @@ class WorldFlags(object):
         for flag in WorldFlags.Flags:
             setattr(self, flag[0], 0 if flag[1] is not None else [])
 
-    def setFlag(self, flag, value):
+    def set(self, flag, value):
         setattr(self, flag, value)
 
-    def getFlag(self, flag):
+    def get(self, flag):
         return getattr(self, flag)
 

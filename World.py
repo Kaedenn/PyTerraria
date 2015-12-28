@@ -7,8 +7,12 @@ class World:
     See the World class docstring for usage.
 """
 
+import collections
 import copy
+import cProfile
 import os
+import pstats
+import StringIO
 import sys
 import time
 from warnings import warn
@@ -22,6 +26,7 @@ import IDs
 import Tile
 import Chest
 import Entity
+from Region.Poly import PointsToChain
 
 class _G(object):
     def __init__(self):
@@ -29,6 +34,12 @@ class _G(object):
         self.DEBUG_MODE = False
 
 G = _G()
+
+BORDER_TILES = 40
+SIZE_SMALL = (4200, 1200)
+SIZE_MEDIUM = (6400, 1800)
+SIZE_LARGE = (8400, 2400)
+SIZE_UNKNOWN = (-1, -1)
 
 def verbose(string, *args):
     "Output string % args if G.VERBOSE_MODE is True"
@@ -52,6 +63,33 @@ def debug(string, *args):
 
 WORLDPATH_LINUX = os.path.expanduser("~/.local/share/Terraria/Worlds")
 WORLDPATH_WINDOWS = None
+
+def PolyMatch_Tile(tileid):
+    """
+    Used for World.GetPolygon:
+        poly = w.GetPolygon(PolyMatch_Tile(IDs.Tile.LihzahrdBrick))
+    """
+    return lambda t: t.Type == tileid
+
+def PolyMatch_Wall(wallid):
+    """
+    Used for World.GetPolygon:
+        poly = w.GetPolygon(PolyMatch_Wall(IDs.Wall.LihzahrdBrickUnsafe))
+    """
+    return lambda t: t.Wall == wallid
+
+def PolyMatch(tileid, wallid):
+    """
+    Used for World.GetPolygon:
+        poly = w.GetPolygon(PolyMatch(IDs.Tile.LihzahrdBrick,
+                                      IDs.Wall.LihzahrdBrickUnsafe))
+    Satisfied for tiles matching both the tile id and wall id given, so
+    the above is equivalent to:
+        tfn = PolyMatch_Tile(IDs.Tile.LihzahrdBrick)
+        wfn = PolyMatch_Wall(IDs.Wall.LihzahrdBrickUnsafe)
+        poly = w.GetPolygon(lambda tile: tfn(tile) and wfn(tile))
+    """
+    return lambda t: t.Type == tileid and t.Wall == wallid
 
 class World(object):
     """
@@ -87,22 +125,27 @@ class World(object):
                  load_tents=True,
                  progress=False,
                  verbose=False, debug=False,
-                 progress_delay=0.2):
+                 progress_delay=0.2,
+                 profile=False):
         """See the World class or World module docstring"""
         self._readonly = read_only
-        self._extents = None
         self._header = None
         self._flags = None
         self._tiles = None
         self._chests = None
         self._signs = None
         self._npcs = None
-        self._width, self._height = 0, 0
-        self._extents = [0, 0]
+        self._tents = None
+        self._width = 0
+        self._height = 0
         self._loaded = False
         self._last_progress_time = 0
         self._curr_progress_time = 0
         self._progress_delay = progress_delay
+        self._profiler = cProfile.Profile() if profile else None
+        self._prof_stats = []
+        self._tile_counts = collections.defaultdict(int)
+        self._wall_counts = collections.defaultdict(int)
 
         G.VERBOSE_MODE = G.VERBOSE_MODE or verbose or debug
         G.DEBUG_MODE = G.DEBUG_MODE or debug
@@ -122,6 +165,19 @@ class World(object):
         if fname is not None and fobj is None:
             self.Load(open(fname, 'r'))
 
+    def ProfStart(self):
+        if self._profiler is not None:
+            self._profiler.enable()
+
+    def ProfEnd(self):
+        if self._profiler is not None:
+            self._profiler.disable()
+            self._profiler.create_stats()
+            self._profiler.print_stats(sort='cumulative')
+
+    def GetProfileStats(self):
+        return self._prof_stats
+
     def __repr__(self):
         if self._loaded:
             return "<Terraria World %r (%d, %d)>" % (self._flags.Title,
@@ -129,9 +185,7 @@ class World(object):
         return super(World, self).__repr__()
 
     def _PosToIdx(self, x, y):
-        if 0 <= x < self._width and 0 <= y < self._height:
-            return y * self._width + x
-        raise RuntimeError("Invalid OOB tile position (%s,%s)" % (x, y))
+        return y * self._width + x
 
     def _IdxToPos(self, idx):
         return (idx % self._width, int(idx / self._width))
@@ -151,7 +205,7 @@ class World(object):
         if delay < self._progress_delay and not force:
             return
         if message is not None:
-            m = message % args if args else str(message)
+            m = (message % args) if args else str(message)
             self._max_progress_len = max((len(m), self._max_progress_len))
             sys.stderr.write(m)
         sys.stderr.write(" "*self._max_progress_len + "\r")
@@ -181,8 +235,8 @@ class World(object):
                 if f.endswith('.wld'):
                     w = World()
                     w.Open(open(fp, 'r'))
-                    w.LoadFileHeader()
-                    w.LoadWorldFlags()
+                    w.LoadHeader()
+                    w.LoadFlags()
                     worlds.append((f, w, fp))
         verbose("Discovered %d worlds", len(worlds))
         return worlds
@@ -202,13 +256,15 @@ class World(object):
             if os.path.exists(fp):
                 return open(fp, 'r') if doopen else fp
         for fn, w, fp in World.ListWorlds():
-            if worldname is not None and worldname == w.GetWorldFlag('Title'):
+            if worldname is not None and worldname == w.GetFlag('Title'):
                 return open(fp, 'r') if doopen else fp
-            elif worldid is not None and worldid == w.GetWorldFlag('WorldId'):
+            elif worldid is not None and worldid == w.GetFlag('WorldId'):
                 return open(fp, 'r') if doopen else fp
         if not failquiet:
             raise RuntimeError("World %s not found" % (worldname,))
         verbose("No world matching (n=%r, id=%r) found", worldname, worldid)
+
+    # {{{ Region <Loaders> begin
 
     def Load(self, fobj=None):
         """Loads the world given by @param fobj (if present) or the value of
@@ -220,7 +276,7 @@ class World(object):
             self._stream = BinaryString.BinaryString(fobj.read(),
                                                      debug=G.DEBUG_MODE)
         # Populate self._header
-        self.LoadFileHeader()
+        self.LoadHeader()
 
         offsets = self._header.SectionPointers
         verbose("Header size: %s" % (offsets[1] - offsets[0],))
@@ -230,11 +286,10 @@ class World(object):
 
         self._progress("Loading world flags")
         assert self._pos() == self._header.GetFlagsPointer()
-        self.LoadWorldFlags()
+        self.LoadFlags()
         assert self._pos() == self._header.GetTilesPointer()
         self._width = self._flags.TilesWide
         self._height = self._flags.TilesHigh
-        self._extents = [self._flags.TilesWide, self._flags.TilesHigh]
         if self._should_load_tiles:
             self._progress("Loading tiles...")
             self.LoadTiles(self._flags.TilesWide, self._flags.TilesHigh)
@@ -271,12 +326,12 @@ class World(object):
         verbose("Loaded footer: %s", self._footer)
         if not self._footer['Loaded']:
             warn("Invalid footer detected!")
-        if self._footer['Title'] != self.GetWorldFlag('Title'):
+        if self._footer['Title'] != self.GetFlag('Title'):
             warn("Footer title %r does not match header title %r" % (
-                self._footer['Title'], self.GetWorldFlag('Title')))
-        if self._footer['WorldID'] != self.GetWorldFlag('WorldId'):
+                 self._footer['Title'], self.GetFlag('Title')))
+        if self._footer['WorldID'] != self.GetFlag('WorldId'):
             warn("Footer ID %s does not match header ID %s" % (
-                self._footer['WorldID'], self.GetWorldFlag('WorldId')))
+                 self._footer['WorldID'], self.GetFlag('WorldId')))
         self._progress(force=True)
 
         if G.DEBUG_MODE:
@@ -286,7 +341,7 @@ class World(object):
             for nbytes, ntimes in stats:
                 print("%d\t%d" % (nbytes, ntimes))
 
-    def LoadFileHeader(self, stream=None):
+    def LoadHeader(self, stream=None):
         if stream is None:
             stream = self._stream
         header = Header.WorldFileHeader()
@@ -306,7 +361,7 @@ class World(object):
         self._header = header
         self._loaded = True
 
-    def LoadWorldFlags(self, stream=None):
+    def LoadFlags(self, stream=None):
         if stream is None:
             stream = self._stream
         if self._header is None or not self._header.Version:
@@ -325,12 +380,12 @@ class World(object):
                 # special parsing
                 if name == "Anglers":
                     anglers = self._LoadAnglers(flags.NumAnglers)
-                    flags.setFlag(name, anglers)
+                    flags.set(name, anglers)
                 elif name == "KilledMobs":
                     killcount = self._LoadKilledMobs(flags.KilledMobCount)
-                    flags.setFlag(name, killcount)
+                    flags.set(name, killcount)
                 elif name == "UnknownFlags":
-                    flags.setFlag(name, self._LoadUnknownHeaders())
+                    flags.set(name, self._LoadUnknownHeaders())
                 else:
                     assert typename is not None, "invalid flag %s" % (name,)
             else:
@@ -339,13 +394,12 @@ class World(object):
                 if name.startswith('OreTier'):
                     if IDs.valid_tile(value):
                         verbose("flag %s = 0x%x (%d %s)" % (name, value, value,
-                            IDs.TileID[value]))
-                    elif flags.getFlag('HardMode'):
+                                IDs.TileID[value]))
+                    elif flags.get('HardMode'):
                         warn("Bad ore tier: %s, %s" % (name, value))
-                flags.setFlag(name, value)
+                flags.set(name, value)
         self._width = flags.TilesWide
         self._height = flags.TilesHigh
-        self._extents = [flags.TilesWide, flags.TilesHigh]
         self._flags = flags
 
     def _LoadAnglers(self, num_anglers):
@@ -372,6 +426,7 @@ class World(object):
         return flags
 
     def LoadTiles(self, w, h):
+        self.ProfStart()
         self._ensure_offset(self._header.GetTilesPointer())
         verbose("Loading %d tiles (%d by %d)" % (w*h, w, h))
         start = self._header.SectionPointers[1]
@@ -388,9 +443,14 @@ class World(object):
             while y < h and self._pos() < end:
                 bytes_loaded = self._pos() - start
                 self._progress("Loading tiles... %d/%d %d%%",
-                        bytes_loaded-start, size, bytes_loaded*100/size)
+                               bytes_loaded-start, size,
+                               bytes_loaded*100/size)
                 i = self._PosToIdx(x, y)
                 tile, rle = Tile.FromStream(self._stream, important)
+                if tile.IsActive:
+                    self._tile_counts[tile.Type] += max(rle, 1)
+                if tile.Wall != 0:
+                    self._wall_counts[tile.Wall] += max(rle, 1)
                 nloaded += 1
                 tiles[i] = tile
                 while rle > 0:
@@ -411,10 +471,10 @@ class World(object):
             xerr = w - x
             yerr = h - y
             warn("Incomplete section! Terminated on tile (%d, %d)" % (x, y))
-            warn("Rows left to parse: %d, columns left to parse: %d" %
-                    (xerr, yerr))
+            warn("Rows left: %d, columns left: %d" % (xerr, yerr))
         verbose("Actually loaded %d tiles" % (nloaded,))
         self._tiles = tiles
+        self.ProfEnd()
 
     def LoadChests(self):
         self._ensure_offset(self._header.GetChestsPointer())
@@ -474,13 +534,12 @@ class World(object):
             dispname = self._stream.readString()
             pos_x = self._stream.readSingle()
             pos_y = self._stream.readSingle()
-            pos = (pos_x, pos_y)
             homeless = self._stream.readBoolean()
             home_x = self._stream.readInt32()
             home_y = self._stream.readInt32()
-            home = (home_x, home_y)
-            npc = Entity.NPCEntity(name=name, display_name=dispname, pos=pos,
-                    homeless=homeless, home=home)
+            npc = Entity.NPCEntity(name=name, display_name=dispname,
+                                   pos=(pos_x, pos_y), homeless=homeless,
+                                   home=(home_x, home_y))
             verbose("Loaded NPC: %s", npc)
             npcs.append(npc)
         self._npcs = npcs
@@ -489,8 +548,7 @@ class World(object):
                 name = self._stream.readString()
                 pos_x = self._stream.readSingle()
                 pos_y = self._stream.readSingle()
-                pos = (pos_x, pos_y)
-                mob = Entity.MobEntity(name=name, pos=pos)
+                mob = Entity.MobEntity(name=name, pos=(pos_x, pos_y))
                 verbose("Loaded mob: %s", mob)
                 mobs.append(mob)
         self._mobs = mobs
@@ -507,18 +565,20 @@ class World(object):
             id_ = self._stream.readInt32()
             pos_x = self._stream.readInt16()
             pos_y = self._stream.readInt16()
-            pos = (pos_x, pos_y)
             if type_ == Entity.ENTITY_DUMMY:
                 npc = self._stream.readInt16()
-                tent = Entity.DummyTileEntity(type=type_, id=id_, pos=pos,
-                                              npc=npc)
+                tent = Entity.DummyTileEntity(type=type_, id=id_,
+                                              pos=(pos_x, pos_y), npc=npc)
             elif type_ == Entity.ENTITY_ITEM_FRAME:
                 item = self._stream.readInt16()
                 prefix = self._stream.readByte()
                 stack = self._stream.readInt16()
-                tent = Entity.ItemFrameTileEntity(type=type_, id=id_, pos=pos,
+                tent = Entity.ItemFrameTileEntity(type=type_, id=id_,
+                                                  pos=(pos_x, pos_y),
                                                   item=item, prefix=prefix,
                                                   stack=stack)
+            else:
+                warn("Unknown tile entity: %d" % (type_,))
             verbose("Loaded tile entity: %s", tent)
             tents.append(tent)
         self._tents = tents
@@ -530,6 +590,8 @@ class World(object):
         footer['Title'] = self._stream.readString()
         footer['WorldID'] = self._stream.readInt32()
         self._footer = footer
+
+    # }}} Region <Loaders> end
 
     def GetHeader(self):
         return self._header
@@ -551,12 +613,14 @@ class World(object):
             for x in xrange(xmin, xmax):
                 if progress is not None:
                     curr += 1
-                    self._progress("%s %d/%d %d%%" % (progress, curr,
-                        total, curr*100/total))
+                    self._progress("%s %d/%d %d%%", progress, curr, total,
+                                   curr*100/total)
                 if rowcol:
                     yield y, x, self._tiles[self._PosToIdx(x, y)]
                 else:
                     yield x, y, self._tiles[self._PosToIdx(x, y)]
+        if progress is not None:
+            self._progress(force=True)
 
     def Width(self):
         return self._width
@@ -564,82 +628,176 @@ class World(object):
     def Height(self):
         return self._height
 
-    def GetTile(self, i, j):
-        "Return the Tile object at x=i, y=j"
-        if not (0 <= i < self._width) or not (0 <= j < self._height):
-            raise IndexError("(%d,%d) must be between (0, 0) and (%d, %d)" %
-                    (i, j, self._width, self._height))
-        return self._tiles[self._PosToIdx(i, j)]
+    def GetTile(self, x, y):
+        "Return the Tile object at x, y"
+        return self._tiles[self._PosToIdx(x, y)]
 
     def GetTiles(self, rows, cols):
-        """Return all tiles in rows, cols:
+        """
+        Return all tiles in rows, cols:
         @param rows - an iterable of rows to get
-        @param cols - an iterable of cols to get"""
+        @param cols - an iterable of cols to get
+        """
         for r in rows:
             for c in cols:
                 yield self._tiles[self._PosToIdx(c, r)]
 
     def __getitem__(self, idx):
+        """
+        World itemgetter
+        If w = World(), then:
+            w[a, b] obtains the tile at row=a, col=b
+            w[a, ...] obtains all tiles at row=a
+            w[::2, b] obtains every even tile at col=b
+            w[::2, :5] obtains every even tile from columns 0 < b < 5
+
+        __getitem__ requires one argument: a pair of two objects. Each object
+        can be either a single number, a slice, or an Ellipsis.
+        """
         r, c = Ellipsis, Ellipsis
         try:
             r, c = idx
         except (TypeError, ValueError) as e:
             raise ValueError("__getitem__ requires a pair (r,c)", e)
-        rows = [r]
-        cols = [c]
-        if r == Ellipsis:
-            rows = range(self._height)
-        elif isinstance(r, slice):
-            start = r.start if r.start is not None else 0
-            stop = r.stop if r.stop is not None else self._height
-            step = r.step if r.step is not None else 1
-            rows = range(start, stop, step)
-        elif r < 0:
-            while r < 0:
-                r = self._height + r
-            rows = [r]
-        if c == Ellipsis:
-            cols = range(self._width)
-        elif isinstance(c, slice):
-            start = c.start if c.start is not None else 0
-            stop = c.stop if c.stop is not None else self._width
-            step = c.step if c.step is not None else 1
-            cols = range(start, stop, step)
-        elif c < 0:
-            while c < 0:
-                c = self._width + c
-            cols = [c]
-        verbose("Returning %d tiles", len(rows)*len(cols))
+        notNoneElse = lambda value: value if value is not None else default
+        def parseGetItemArg(arg, maxVal):
+            if arg == Ellipsis:
+                return range(maxVal)
+            elif isinstance(arg, slice):
+                return range(notNoneElse(arg.start, 0),
+                             notNoneElse(arg.stop, maxVal),
+                             notNoneElse(arg.step, 1))
+            elif arg < 0:
+                return [maxVal + arg]
+            return [arg]
+        rows = parseGetItemArg(r, self._height)
+        cols = parseGetItemArg(c, self._width)
+        # special case instance of asking for just one tile
         if len(rows) == 1 and len(cols) == 1:
             return self._tiles[self._PosToIdx(cols[0], rows[0])]
         return self.GetTiles(rows, cols)
 
-    def GetWorldFlags(self):
+    def GetFlags(self):
         "Return a tuple of (flagName, flagValue)"
         flags = []
         for flag, _, _ in WorldFlags.Flags:
-            flags.append((flag, self._flags.getFlag(flag)))
+            flags.append((flag, self._flags.get(flag)))
         return tuple(flags)
 
-    def GetWorldFlag(self, flag):
+    def GetFlag(self, flag):
         "Return the value of @param flag"
-        return self._flags.getFlag(flag)
+        return self._flags.get(flag)
 
     def GetNPCs(self):
+        "Return the loaded NPCs"
         return self._npcs
 
     def GetTileEntities(self):
+        "Return the loaded tile entities"
         return self._tents
 
-    def CountTiles(self):
-        "Returns a dict of numeric tile type to frequency counts"
-        counts = {}
-        for tile in self._tiles:
-            if tile is not None and tile.IsActive:
-                if tile.Type not in counts:
-                    counts[tile.Type] = 1
-                else:
-                    counts[tile.Type] += 1
-        verbose("Active tile types: %d", len(counts.keys()))
-        return counts
+    def GetLevels(self):
+        "Returns a dictionary of strings (name) to number (depth)"
+        w, h = self.Width(), self.Height()
+        surf = self.GetFlag('GroundLevel')
+        rock = self.GetFlag('RockLevel')
+        space = surf / 5 + (w**2) / 1764000 + 65
+        caves = rock + (1080 / 2) / 16 + 3
+        hell = h - 204
+        lava = int((rock+hell)/2) + 3
+        return {
+            'Space': space,
+            'Caves': caves,
+            'Hell': hell,
+            'Surface': surf,
+            'Rock': rock,
+            'Lava': lava
+        }
+
+    def GetPolygon(self, match_fn, simplify=False, epsilon=0.5, multi=False,
+                   xmin=None, xmax=None, ymin=None, ymax=None,
+                   shortcircuit=False, progress=None):
+        """
+        Returns a (possibly concave) polygon of all tile positions satisfying
+        the match function given by @param match_fn. See the module-level
+        PolyMatch_Tile, PolyMatch_Wall, and PolyMatch functions.
+
+        If @param multi is True, the result is a list of polygons, rather than
+        a single polygon.
+
+        If @param simplify is True, then the result is passed through the
+        shapely module's implementation of the Ramer-Douglas-Peucker
+        algorithm.
+
+        If @param shortcircuit is True, then the search will end on the first
+        column having zero matching tiles, rather than the last column. This
+        works well for things like the Temple or an unmodified Jungle or Snow
+
+        Unless otherwise specified via @param epsilon, simplification is done
+        with an epsilon of half a tile, so only the straight-line segments are
+        simplified (i.e. only extraneous colinear tiles are removed). The
+        epsilon is a minimum offset for points to be pruned, usually between
+        0.5 and around 4 or 5. Larger values result in smaller polygons.
+        """
+        simplify_fn = lambda p: p
+        if simplify:
+            import Region.PolySet
+            simplify_fn = lambda p: Region.PolySet.Simplify(p, epsilon)
+        xmin = 0 if xmin is None else xmin
+        xmax = self.Width() if xmax is None else xmax
+        ymin = 0 if ymin is None else ymin
+        ymax = self.Height() if ymax is None else ymax
+        xseq = xrange(xmin, xmax)
+        yseq = xrange(ymin, ymax)
+        polys = []
+        points = []
+        # 1) generate a sequence of (top, bottom) point pairs
+        for x in xseq:
+            if progress is not None:
+                self._progress("%s %d/%d %d%%", progress, x-xmin, xmax-xmin,
+                               (x-xmin)*100/(xmax-xmin))
+            start = None
+            end = None
+            for y in yseq:
+                if match_fn(self._tiles[self._PosToIdx(x, y)]):
+                    if start is None:
+                        start = [x, y]
+                    end = [x, y]
+            if start is not None: # implies: end is not None
+                points.append([start, end])
+            else:
+                if multi and len(points) > 0:
+                    polys.append(points)
+                    points = []
+                if shortcircuit and len(polys) > 0:
+                    break
+        if len(points) > 0:
+            verbose("Adding points: %s", points)
+            polys.append(points)
+        # 2) convert those to polygons
+        results = []
+        for poly in polys:
+            verbose("Evaluating %s", poly)
+            if len(poly) < 3:
+                warn("Discarding line segment %s" % (poly,))
+                continue
+            results.append(simplify_fn(PointsToChain(poly)))
+        if progress is not None:
+            self._progress(force=True)
+        return results if multi else results[0]
+
+    def GetTileCounts(self):
+        return self._tile_counts
+
+    def GetTileCount(self, tile):
+        return self._tile_counts[tile]
+
+    def GetWallCounts(self):
+        return self._wall_counts
+
+    def GetWallCount(self, wall):
+        return self._wall_counts[wall]
+
+ListWorlds = World.ListWorlds
+FindWorld = World.FindWorld
 

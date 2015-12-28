@@ -1,8 +1,33 @@
+# Utilities for examining Terraria worlds
 
-# Tools for interpreting Terraria world and mini-map files
+This suite contains three top-level utilities and several other modules
 
-The program is fairly self-explanatory;
+## WorldFile utility
+    WorldFile.py [args] <path>
 
-```python WorldFile.py --help```
+* Finding worlds
 
-```python WorldFile.py <name of world file> -v```
+		Passing --list without specifying a path will result in the utility searching for and listing all Terraria worlds in their expected locations.
+
+		WorldFile.py --list
+		World World 1: ID 858410861, Path: /home/user/.local/share/Terraria/Worlds/World_1.wld
+
+* Basic usage: deriving or examining world information
+
+* The powerful ```find``` argument
+
+* Tile table arguments
+
+* The ```png``` argument
+
+## IDs utility and module
+
+## RegionArea utility
+
+## World module
+
+## MapFile module
+
+## BinaryString module
+
+## Tile module

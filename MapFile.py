@@ -503,8 +503,8 @@ class Map(object):
 
     def FromWorld(self, world):
         self._world = world
-        self._groundLevel = world.GetWorldFlag('GroundLevel')
-        self._rockLevel = world.GetWorldFlag('RockLevel')
+        self._groundLevel = world.GetFlag('GroundLevel')
+        self._rockLevel = world.GetFlag('RockLevel')
         self._width = world.Width()
         self._height = world.Height()
 
@@ -513,8 +513,8 @@ class Map(object):
                         load_npcs=False, load_tents=False)
         w.Load(open(World.World.FindWorld(worldid=self._worldID)))
         self._world = w
-        self._groundLevel = w.GetWorldFlag('GroundLevel')
-        self._rockLevel = w.GetWorldFlag('RockLevel')
+        self._groundLevel = w.GetFlag('GroundLevel')
+        self._rockLevel = w.GetFlag('RockLevel')
         self._width = w.Width()
         self._height = w.Height()
 

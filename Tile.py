@@ -146,6 +146,8 @@ class Tile(object):
     def __getattr__(self, attrib):
         if attrib == "Name":
             return IDs.TileID[self.Type] if self.IsActive else ''
+        elif attrib == "Tile":
+            return self.Type
         return Tile.SerializedLookup[attrib]
 
     def Format(self, fmt):

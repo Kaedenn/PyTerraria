@@ -1,5 +1,91 @@
 #!/usr/bin/env python
 
+"""
+Terraria IDs <--> Names lookup utility and API
+
+At the core of this module is a large collection of dictionaries of either
+numbers to strings or strings to numbers. All dictionaries ending in "ID" are
+of numeric IDs mapping to strings. All dictionaries ending in "s" are the
+opposite: mappings of strings to numeric IDs. The following symmetric
+dictionaries exist:
+    Buffs[BuffID[x]] == x
+    Items[ItemID[x]] == x
+    NPCs[NPCID[x]] == x
+    Projectiles[ProjectileID[x]] == x
+    Tiles[TileID[x]] == x
+    Walls[WallID[x]] == x
+
+The following dictionaries lack a symmetric lookup:
+
+ID Dictionary       |       Description
+------------------------------------------------------------------------------
+AnimationID         |       Mushroom statue animation IDs to names
+ChainID             |       Grappling chain IDs to names
+DustID              |       Dust IDs to names
+ExtrasID            |       Misc. NPC part IDs to names (for multipart NPCs)
+GlowMaskID          |       Glow effect mask IDs to names
+GoreID              |       Gore type IDs to names
+InvasionID          |       Invasion IDs to names
+MessageID           |       Network message IDs to names
+PlayerVariantID     |       Player body variation IDs to names
+PlayerTextureID     |       Player body part IDs to names
+StatusID            |       Error status IDs to names
+
+The following dictionaries have a symmetric lookup:
+ID Dictionary   |   Names       | Description
+------------------------------------------------------------------------------
+BuffID          |   Buffs       |   Status effect types and names
+ItemID          |   Items       |   Item types and names
+NPCID           |   NPCs        |   NPC types and names
+ProjectileID    |   Projectiles |   Projectile types and names
+TileID          |   Tiles       |   Tile types and names
+WallID          |   Walls       |   Wall types and names
+
+The following are extra dictionaries for different uses or purposes:
+Dictionary      |   Description
+------------------------------------------------------------------------------
+Frames          |   Tile U, V component association information (see below)
+Prefixes        |   Prefix ID to name lookup (0 is empty string)
+NPCToBanner     |   Dictionary of NPC ID (NPCs dict) to banner ID
+BannerToNPC     |   List of banner IDs, indexed by NPC ID
+Sets            |   Tile set classification associations
+
+Note:
+* The "Prefixes" dictionary has duplicates. These duplicates are in-game.
+
+There are three lookup classes for a more Pythonic-feeling lookup:
+Class   |   Description
+------------------------------------------------------------------------------
+Item    |   Attributes are item names, values are item IDs
+Tile    |   Attributes are tile names, values are tile IDs
+Wall    |   Attributes are wall names, values are wall IDs
+
+For each of the three classes:
+    Tile.<x> == getitem(Tile, x) == Tiles[x] == TileID[Tiles[x]]
+
+### TILE U, V ASSOCIATIONS ###
+Tile frames are 18 pixels wide (exposed as IDs.FRAME_SIZE). For most tiles
+this information is just artistic; it specifies the exact design for e.g.
+grass tiles, which have more than one graphic. For other tiles, such as
+statues or banners, there is only one tile ID but several different kinds of
+tiles, such as Tree Statue, Gargoyle Statue, or Imp Statue.
+
+The Frames dictionary encapsulates the information required to convert a
+Tile, U, and V triplet to a specific item ID.
+
+* The keys of the Frames dictionary are tile names (given by TileID[x]).
+* Each value is a dictionary consisting of several keys and values, some of
+  which may be the following:
+  * Width       the specific width of the tile's frame (usually 18 or 36)
+  * Height      the specific height of the tile's frame (sometimes absent)
+  * Key         either 'Width' or 'Height'; for automatic lookups
+  * Entries     list or dictionary of item IDs
+* Tile dictionaries lacking a a key named 'Key' are for manual calculation
+  (by functions named _identify_<TileName>).
+* Some tiles have widths or heights other than multiples of FRAME_SIZE.
+
+"""
+
 import os
 import struct
 
@@ -22,7 +108,7 @@ See :help c_^r
 """
 
 INVALID = -1
-FRAME_WIDTH = 18
+FRAME_SIZE = 18
 
 def _SwapKeysAndValues(d):
     result = dict((v,k) for k,v in d.iteritems())
@@ -45,23 +131,14 @@ def _MakeNamesClass(table):
 
 Frames = {
     'ExposedGems': {
-        'Width': FRAME_WIDTH,
-        'Height': FRAME_WIDTH,
-        'Min': 0,   # First exposed gem is index 0
-        'Max': 6,   # Last exposed gem is index 6,
-        'Entries': {
-            0: 181, # Amethyst
-            1: 180, # Topaz
-            2: 177, # Sapphire
-            3: 179, # Emerald
-            4: 178, # Ruby
-            5: 182, # Diamond
-            6: 999, # Amber
-        }
+        'Width': FRAME_SIZE,
+        'Height': FRAME_SIZE,
+        'Key': 'Width',
+        'Entries': [181, 180, 177, 179, 178, 182, 999]
     },
     'SmallPiles': {
-        'Width': 2*FRAME_WIDTH,
-        'Height': FRAME_WIDTH,
+        'Width': 2*FRAME_SIZE,
+        'Height': FRAME_SIZE,
         'Min': 76,
         'Max': 81,
         'Entries': {
@@ -79,21 +156,99 @@ Frames = {
     },
     'DyePlants': {
         'Width': 34,
-        'Height': None, # Not known, not useful
+        'Key': 'Width',
         'Min': 8,
         'Max': 11
     },
     'Banners': {
-        'Width': FRAME_WIDTH,
-        'Height': 2*FRAME_WIDTH,
+        'Width': FRAME_SIZE,
+        'Height': 2*FRAME_SIZE,
         'RowSize': 54,  # Number of banners per row
         'Min': 21,      # First mob banner is index 21
         'Stride': 90    # Difference in IDs between two rows
     },
     'Statues': {
-        'Width': FRAME_WIDTH,
-        'Height': 2*FRAME_WIDTH
-    }
+        'Width': 2*FRAME_SIZE,
+        'Entries': {
+            0: 360,
+            1: 52,
+            43: 1152,
+            44: 1153,
+            45: 1154,
+            46: 1408,
+            47: 1409,
+            48: 1410,
+            49: 1462,
+            50: 2672,
+        },
+        "default": lambda idx: 438 + idx - 2
+    },
+    'Torches': {
+        'Height': 22,
+        'Key': 'Height',
+        'Entries': [0, 427, 428, 429, 430, 431, 432, 433, 523, 974, 1245,
+                    1333, 2274, 3004, 3405, 3114]
+    },
+    'MetalBars': {
+        'Width': FRAME_SIZE,
+        'Key': 'Width',
+        'Entries': [20, 703, 22, 704, 21, 705, 19, 706, 57, 117, 175, 381,
+                    1184, 382, 1191, 391, 1198, 1006, 1225, 1257, 1552, 3261,
+                    3467]
+    },
+    'Trees': {},
+    'PalmTree': {},
+    'ChristmasTree': {},
+    'BeachPiles': {
+        'Height': 22,
+        'Key': 'Height',
+        'Entries': [2625, 2626]
+    },
+    'HolidayLights': {
+        'Width': FRAME_SIZE,
+        'Key': 'Width',
+        'Entries': [596, 597, 598, 596, 597, 598]
+    },
+    'Bottles': {
+        'Height': FRAME_SIZE,
+        'Key': 'Height'
+    },
+    'Platforms': {
+        'Height': FRAME_SIZE,
+        'Key': 'Height',
+        'Entries': [94, 631, 632, 633, 634, 913, 1384, 1385, 1386, 1387,
+                    1388, 1389, 1418, 1457, 1702, 1796, 1818, 2518, 2549,
+                    2566, 2581, 2627, 2628, 2629, 2630, 2744, 2822, 3144,
+                    3146, 3145]
+    },
+    'Candles': {
+        'Width': 22,
+        'Key': 'Width',
+        'Entries': [105, 1405, 1406, 1407, 2045, 2046, 2047, 2048, 2049, 2050,
+                    2051, 2052, 2053, 2054, 2153, 2154, 2155, 2236, 2523,
+                    2542, 2556, 2571, 2648, 2649, 2650, 2651, 2818, 3171,
+                    3173, 3712]
+    },
+    'Traps': {
+        'Height': FRAME_SIZE,
+        'Key': 'Height',
+        'Entries': [539, 1146, 1147, 1148, 1148]
+    },
+    'PressurePlates': {
+        'Height': FRAME_SIZE,
+        'Key': 'Height',
+        'Entries': [529, 541, 542, 543, 852, 853, 1151]
+    },
+    'Timers': {
+        'Width': FRAME_SIZE,
+        'Key': 'Width',
+        'Entries': [583, 584, 585]
+    },
+    'JunglePlants': {},
+    'JunglePlants2': {},
+    'MushroomPlants': {},
+    'MushroomTrees': {}
+    # Herbs
 }   # Frames
 
 Prefixes = {
@@ -7411,12 +7566,30 @@ Sets = {
     }
 }
 
-def _identify_ExposedGems(tile, u, v):
-    # Amethyst, Topaz, Sapphire, Emerald, Ruby, Diamond, Amber
-    idx = u / Frames['ExposedGems']['Width']
-    if idx in Frames['ExposedGems']['Entries']:
-        return Frames['ExposedGems']['Entries'][idx]
-    return INVALID
+def IsWallSafe(wallid):
+    return 'Unsafe' not in IDs.WallID[wallid]
+
+def _getitem_default(items, idx, default):
+    if 0 <= idx < len(items) or idx in items:
+        return items[idx]
+    return default
+
+def _identify_tile(tid, u, v):
+    if TileID[tid] not in Frames:
+        raise ValueError("Tile %d not in frame table" % (tid,))
+    idx = 0
+    Frame = Frames[TileID[tid]]
+    emsg = lambda s: "Tile %s %d %s %s" % (TileID[tid], tid, s, Frame)
+    if 'Key' not in Frame:
+        raise ValueError(emsg("Lookup on wrong kind of tile"))
+    if 'Entries' not in Frame:
+        raise ValueError(emsg("Tile frame missing entries"))
+    assert Frame['Key'] in ('Width', 'Height'), emsg("Invalid key")
+    if Frame['Key'] == 'Width':
+        idx = u / Frame['Width']
+    elif Frame['Key'] == 'Height':
+        idx = v / Frame['Height']
+    return _getitem_default(Frame['Entries'], idx, INVALID)
 
 def _identify_SmallPiles(tile, u, v):
     idx = u / Frames['SmallPiles']['Width']
@@ -7436,6 +7609,8 @@ def _identify_DyePlants(tile, u, v):
 
 def _identify_Banners(tile, u, v):
     # FIXME: Doesn't work
+    # FIXME: Requires area knowledge (or seems to). How do I implement this
+    # without such knowledge?
     idx = u / Frames['Banners']['Width'] - Frames['Banners']['Min']
     offset = u
     # banners are oriented in a row-major matrix, 54 entries wide
@@ -7445,49 +7620,15 @@ def _identify_Banners(tile, u, v):
     return idx
 
 def _identify_Statues(tile, u, v):
-    """
-    int num6 = frameX / 36;
-    int Type;
-    switch (num6)
-    {
-      case 0:
-        Type = 360;
-        break;
-      case 1:
-        Type = 52;
-        break;
-      case 43:
-        Type = 1152;
-        break;
-      case 44:
-        Type = 1153;
-        break;
-      case 45:
-        Type = 1154;
-        break;
-      case 46:
-        Type = 1408;
-        break;
-      case 47:
-        Type = 1409;
-        break;
-      case 48:
-        Type = 1410;
-        break;
-      case 49:
-        Type = 1462;
-        break;
-      case 50:
-        Type = 2672;
-        break;
-      default:
-        Type = 438 + num6 - 2;
-        break;
-    }
-    """
     idx = u / Frames['Statues']['Width']
+    if idx in Frames['Statues']['Entries']:
+        return Frames['Statues']['Entries'][idx]
+    return Frames['Statues']['default'](idx)
 
-def tile_to_item(tile, u, v, noexcept=False):
+def _identify_Books(tile, u, v):
+    return Item.WaterBolt if u == 90 else Item.Book    
+
+def tile_to_item(tile, u=0, v=0):
     "Returns an item equivalent to the tile passed"
     known = {Tile.ActiveStoneBlock: Item.ActiveStoneBlock,
              Tile.Adamantite: Item.AdamantiteOre,
@@ -7568,6 +7709,7 @@ def tile_to_item(tile, u, v, noexcept=False):
              Tile.HayBlock: Item.Hay,
              Tile.Hellstone: Item.Hellstone,
              Tile.HellstoneBrick: Item.HellstoneBrick,
+             Tile.Hive: Item.Hive,
              Tile.HoneyBlock: Item.HoneyBlock,
              Tile.Honeyfall: Item.HoneyfallBlock,
              Tile.IceBlock: Item.IceBlock,
@@ -7662,56 +7804,86 @@ def tile_to_item(tile, u, v, noexcept=False):
              Tile.WebRope: Item.WebRope,
              Tile.WoodenBeam: Item.WoodenBeam,
              Tile.WoodenSpikes: Item.WoodenSpike,
-             Tile.YellowStucco: Item.YellowStucco}
+             Tile.YellowStucco: Item.YellowStucco,
+             Tile.BunnyCage: Item.BunnyCage,
+             Tile.SnailCage: Item.SnailCage,
+             Tile.PenguinCage: Item.PenguinCage,
+             Tile.GoldButterflyCage: Item.GoldButterflyCage,
+             Tile.CardinalCage: Item.CardinalCage,
+             Tile.GrasshopperCage: Item.GrasshopperCage,
+             Tile.SquirrelOrangeCage: Item.SquirrelOrangeCage,
+             Tile.SquirrelGoldCage: Item.SquirrelGoldCage,
+             Tile.BirdCage: Item.BirdCage,
+             Tile.BlackScorpionCage: Item.BlackScorpionCage,
+             Tile.GoldWormCage: Item.GoldWormCage,
+             Tile.GoldGrasshopperCage: Item.GoldGrasshopperCage,
+             Tile.MouseCage: Item.MouseCage,
+             Tile.GoldBirdCage: Item.GoldBirdCage,
+             Tile.MallardDuckCage: Item.MallardDuckCage,
+             Tile.CageBuggy: Item.CageBuggy,
+             Tile.DuckCage: Item.DuckCage,
+             Tile.GoldFrogCage: Item.GoldFrogCage,
+             Tile.FrogCage: Item.FrogCage,
+             Tile.GoldBunnyCage: Item.GoldBunnyCage,
+             Tile.WormCage: Item.WormCage,
+             Tile.CageGrubby: Item.CageGrubby,
+             Tile.GoldMouseCage: Item.GoldMouseCage,
+             Tile.GlowingSnailCage: Item.GlowingSnailCage,
+             Tile.CageEnchantedNightcrawler: Item.CageEnchantedNightcrawler,
+             Tile.ScorpionCage: Item.ScorpionCage,
+             Tile.CageSluggy: Item.CageSluggy,
+             Tile.SquirrelCage: Item.SquirrelCage}
     for gem in ('Sapphire', 'Ruby', 'Emerald', 'Topaz', 'Amethyst', 'Diamond'):
         known[Tiles[gem]] = Items[gem]
     for i in range(Tile.AmethystGemsparkOff, Tile.AmberGemsparkOff+1):
-        known[i] = 1970 + i - 255
+        known[i] = Item.AmethystGemsparkBlock + i - Tile.AmethystGemsparkOff
     for i in range(Tile.AmethystGemspark, Tile.AmberGemspark+1):
-        known[i] = 1970 + i - 262
+        known[i] = Item.AmethystGemsparkBlock + i - Tile.AmethystGemspark
     for i in range(Tile.Sapphire, Tile.Diamond+1):
-        known[i] = 177 + i - 63
+        known[i] = Item.Sapphire + i - Tile.Sapphire
 
     known[Tile.Plants] = known[Tile.Plants2] = Item.Seed
     known[Tile.Ebonstone] = known[Tile.LivingWood] = Item.Wood
     known[Tile.Vines] = known[Tile.JungleVines] = Item.VineRope # if player.cordage
     known[Tile.Mud] = known[Tile.JungleGrass] = Item.MudBlock
+    known[Tile.LunarBlockSolar] = Item.LunarBlockSolar
     known[Tile.LunarBlockVortex] = known[Tile.LunarBlockSolar] + 1
     known[Tile.LunarBlockNebula] = known[Tile.LunarBlockVortex] + 1
     known[Tile.LunarBlockStardust] = known[Tile.LunarBlockNebula] + 1
     if os.getenv('IDS_DUMP_KNOWN'):
         return known
-    no_lookup = lambda *args: None
+    no_lookup = lambda *args: INVALID
     lookups = {
-        Tiles['Torches']: no_lookup,
-        Tiles['MetalBars']: no_lookup,
-        Tiles['Trees']: no_lookup,
-        Tiles['PalmTree']: no_lookup,
-        Tiles['ChristmasTree']: no_lookup,
-        Tiles['BeachPiles']: no_lookup,
-        Tiles['Hive']: no_lookup,
-        Tiles['HolidayLights']: no_lookup,
-        Tiles['Platforms']: no_lookup,
-        Tiles['Candles']: no_lookup,
-        Tiles['Traps']: no_lookup,
-        Tiles['PressurePlates']: no_lookup,
-        Tiles['Timers']: no_lookup,
-        Tiles['JunglePlants']: no_lookup,
-        Tiles['JunglePlants2']: no_lookup,
-        Tiles['MushroomPlants']: no_lookup,
-        Tiles['MushroomTrees']: no_lookup,
-        #Tiles.Herbs
-        Tiles['ExposedGems']: _identify_ExposedGems,
-        Tiles['SmallPiles']: _identify_SmallPiles,
-        Tiles['DyePlants']: _identify_DyePlants,
-        Tiles['Banners']: _identify_Banners
+        Tile.Torches: _identify_tile,   # Generic
+        Tile.MetalBars: _identify_tile, # Generic
+        Tile.Trees: no_lookup,          # TODO
+        Tile.PalmTree: no_lookup,       # TODO
+        Tile.ChristmasTree: no_lookup,  # TODO
+        Tile.BeachPiles: _identify_tile,    # Generic
+        Tile.HolidayLights: _identify_tile, # Generic
+        Tile.Bottles: _identify_tile,   # Generic
+        Tile.Platforms: _identify_tile, # Generic
+        Tile.Candles: _identify_tile,   # Generic
+        Tile.Traps: _identify_tile,     # Generic
+        Tile.PressurePlates: _identify_tile,    # Generic
+        Tile.Timers: _identify_tile,    # Generic
+        Tile.JunglePlants: no_lookup,   # TODO
+        Tile.JunglePlants2: no_lookup,  # TODO
+        Tile.MushroomPlants: no_lookup, # TODO
+        Tile.MushroomTrees: no_lookup,  # TODO
+        Tile.ExposedGems: _identify_tile,   # Generic
+        Tile.Books: _identify_Books,
+        #Tile.Herbs: no_lookup,         # TODO
+        Tile.SmallPiles: _identify_SmallPiles,
+        Tile.DyePlants: _identify_DyePlants,
+        Tile.Banners: _identify_Banners
     }
+    if os.getenv('IDS_DUMP_LOOKUPS'):
+        return lookups
     if tile in known:
         return known[tile]
     if tile in lookups:
         return lookups[tile](tile, u, v)
-    if not noexcept:
-        raise ValueError("Tile %s not known" % (tile,))
     return INVALID
 
 def valid_tile(tile):
@@ -7823,6 +7995,7 @@ def main():
     if args.q:
         error = lambda _: False
 
+    args.table = args.table.lower()
     if args.table not in Tables:
         error("Error: %s not a valid table" % (args.table,))
         error("Valid tables: %s" % (", ".join(Tables),))
@@ -7849,11 +8022,11 @@ if __name__ == "__main__":
 # NOTE: If any more tables are added (or pseduo-enumeration objects),
 # do not forget to add them to __all__!
 __all__ = ['AnimationID', 'BannerToNPC', 'BuffID', 'Buffs', 'ChainID',
-           'DustID', 'ExtrasID', 'FRAME_WIDTH', 'Frames', 'GlowMaskID',
+           'DustID', 'ExtrasID', 'FRAME_SIZE', 'Frames', 'GlowMaskID',
            'GoreID', 'INVALID', 'InvasionID', 'Item', 'ItemID', 'Items',
            'MessageID', 'NPCID', 'NPCToBanner', 'NPCs', 'PlayerTextureID',
            'PlayerVariantID', 'Prefixes', 'ProjectileID', 'Projectiles',
            'Sets', 'StatusID', 'Tile', 'TileID', 'Tiles', 'WallID', 'Walls',
-           'tile_to_item', 'INVALID', 'FRAME_WIDTH']
+           'tile_to_item', 'INVALID', 'FRAME_SIZE']
 
 
