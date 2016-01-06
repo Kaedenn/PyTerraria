@@ -18,8 +18,6 @@ import time
 from warnings import warn
 
 import Header
-from Header import CompatibleVersion, Version147, Version140, Version104, \
-                   Version101, Version99, Version95
 from WorldFlags import WorldFlags
 import BinaryString
 import IDs
@@ -40,6 +38,15 @@ SIZE_SMALL = (4200, 1200)
 SIZE_MEDIUM = (6400, 1800)
 SIZE_LARGE = (8400, 2400)
 SIZE_UNKNOWN = (-1, -1)
+
+def SizeToStr(size):
+    if size == SIZE_SMALL:
+        return "Small"
+    if size == SIZE_MEDIUM:
+        return "Medium"
+    if size == SIZE_LARGE:
+        return "Large"
+    return "Unknown"
 
 def verbose(string, *args):
     "Output string % args if G.VERBOSE_MODE is True"
@@ -63,6 +70,100 @@ def debug(string, *args):
 
 WORLDPATH_LINUX = os.path.expanduser("~/.local/share/Terraria/Worlds")
 WORLDPATH_WINDOWS = None
+
+class BiomeDefinition(object):
+    def __init__(self, tile_contribute, min_size, win_size):
+        """
+        tile_contribute:
+            dictionaries of tile ID to number denoting the value of that
+            particular tile, like ForestGrass->1, LihzahrdBrick->3 (or w/e)
+        """
+        self._tiles = tile_contribute
+        self._min = min_size
+        self._window = win_size
+
+    def Threshold(self):
+        return self._min
+
+    def WindowSize(self):
+        return self._window
+
+    def TileValue(self, tile_obj):
+        return self._tiles.get(tile_obj.Tile, 0)
+
+# Taken from Main.cs, Player.cs, and Lighting.cs from the decompiled Terraria
+# source code. Terraria uses 45 for the window size (Lighting.offScreenTiles)
+Zone_Corrupt = BiomeDefinition({
+    IDs.Tile.CorruptGrass: 1,
+    IDs.Tile.CorruptPlants: 1,
+    IDs.Tile.Ebonstone: 1,
+    IDs.Tile.CorruptThorns: 1,
+    IDs.Tile.Ebonsand: 1,
+    IDs.Tile.CorruptIce: 1,
+    IDs.Tile.CorruptSandstone: 1,
+    IDs.Tile.CorruptHardenedSand: 1,
+    IDs.Tile.Sunflower: -5
+}, 200, 45)
+Zone_Holy = BiomeDefinition({
+    IDs.Tile.HallowedGrass: 1,
+    IDs.Tile.HallowedPlants: 1,
+    IDs.Tile.HallowedPlants2: 1,
+    IDs.Tile.Pearlstone: 1,
+    IDs.Tile.Pearlsand: 1,
+    IDs.Tile.HallowedIce: 1,
+    IDs.Tile.HallowSandstone: 1,
+    IDs.Tile.HallowHardenedSand: 1
+}, 100, 45)
+Zone_Meteor = BiomeDefinition({
+    IDs.Tile.Meteorite: 1
+}, 50, 45)
+Zone_Jungle = BiomeDefinition({
+    IDs.Tile.JungleGrass: 1,
+    IDs.Tile.JunglePlants: 1,
+    IDs.Tile.JungleVines: 1,
+    IDs.Tile.JunglePlants2: 1,
+    IDs.Tile.LihzahrdBrick: 1
+}, 80, 45)
+Zone_Snow = BiomeDefinition({
+    IDs.Tile.SnowBlock: 1,
+    IDs.Tile.SnowBrick: 1,
+    IDs.Tile.IceBlock: 1,
+    IDs.Tile.BreakableIce: 1,
+    IDs.Tile.HallowedIce: 1,
+    IDs.Tile.CorruptIce: 1,
+    IDs.Tile.FleshIce: 1
+}, 300, 45)
+Zone_Crimson = BiomeDefinition({
+    IDs.Tile.FleshGrass: 1,
+    IDs.Tile.FleshIce: 1,
+    IDs.Tile.Crimstone: 1,
+    IDs.Tile.CrimsonSandstone: 1,
+    IDs.Tile.CrimsonHardenedSand: 1,
+    IDs.Tile.Crimsand: 1,
+    IDs.Tile.CrimtaneThorns: 1,
+    IDs.Tile.Sunflower: -5
+}, 200, 45)
+Zone_Desert = BiomeDefinition({
+    IDs.Tile.Sand: 1,
+    IDs.Tile.Ebonsand: 1,
+    IDs.Tile.Pearlsand: 1,
+    IDs.Tile.Crimsand: 1,
+    IDs.Tile.HardenedSand: 1,
+    IDs.Tile.CorruptHardenedSand: 1,
+    IDs.Tile.HallowHardenedSand: 1,
+    IDs.Tile.CrimsonHardenedSand: 1,
+    IDs.Tile.Sandstone: 1,
+    IDs.Tile.CorruptSandstone: 1,
+    IDs.Tile.HallowSandstone: 1,
+    IDs.Tile.CrimsonSandstone: 1
+}, 1000, 45)
+Zone_Glowshroom = BiomeDefinition({
+    IDs.Tile.MushroomGrass: 1,
+    IDs.Tile.MushroomPlants: 1,
+    IDs.Tile.MushroomTrees: 1
+}, 100, 45)
+Zone_WaterCandle = BiomeDefinition({IDs.Tile.WaterCandle: 1}, 1, 45)
+Zone_PeaceCandle = BiomeDefinition({IDs.Tile.PeaceCandle: 1}, 1, 45)
 
 def PolyMatch_Tile(tileid):
     """
@@ -211,6 +312,8 @@ class World(object):
         sys.stderr.write(" "*self._max_progress_len + "\r")
         self._last_progress_time = self._curr_progress_time
 
+    progress = _progress
+
     def _pos(self):
         return self._stream.get_pos()
 
@@ -247,7 +350,7 @@ class World(object):
         (without .wld suffix), world name as seen in-game, or world ID. Raises
         an exception if no matching world is found, unless @param failquiet is
         True.
-        
+
         If @param doopen is True, return an opened file object."""
         if worldname is None and worldid is None:
             raise RuntimeError("must provide either worldname or worldid")
@@ -313,7 +416,7 @@ class World(object):
             self.LoadNPCs()
         else:
             self._stream.seek_set(self._header.GetTileEntitiesPointer())
-        if self._header.Version >= Version140:
+        if self._header.Version >= Header.Version140:
             if self._should_load_tents:
                 assert self._pos() == self._header.GetTileEntitiesPointer()
                 self._progress("Loading tile entities...")
@@ -543,7 +646,7 @@ class World(object):
             verbose("Loaded NPC: %s", npc)
             npcs.append(npc)
         self._npcs = npcs
-        if self._header.Version >= Version140:
+        if self._header.Version >= Header.Version140:
             while self._stream.readBoolean():
                 name = self._stream.readString()
                 pos_x = self._stream.readSingle()
@@ -679,10 +782,7 @@ class World(object):
 
     def GetFlags(self):
         "Return a tuple of (flagName, flagValue)"
-        flags = []
-        for flag, _, _ in WorldFlags.Flags:
-            flags.append((flag, self._flags.get(flag)))
-        return tuple(flags)
+        return tuple((f, self._flags.get(f)) for f,_,_ in WorldFlags.Flags)
 
     def GetFlag(self, flag):
         "Return the value of @param flag"
@@ -731,18 +831,20 @@ class World(object):
 
         If @param shortcircuit is True, then the search will end on the first
         column having zero matching tiles, rather than the last column. This
-        works well for things like the Temple or an unmodified Jungle or Snow
+        works well for things like the Temple or an unmodified Jungle or Snow.
 
         Unless otherwise specified via @param epsilon, simplification is done
         with an epsilon of half a tile, so only the straight-line segments are
         simplified (i.e. only extraneous colinear tiles are removed). The
         epsilon is a minimum offset for points to be pruned, usually between
-        0.5 and around 4 or 5. Larger values result in smaller polygons.
+        0.5 and around 4 or 5. Larger values result in smaller polygons. Note
+        that this algorithm does not work on "noisy" polygons with large
+        vertex angle variation.
         """
         simplify_fn = lambda p: p
         if simplify:
-            import Region.PolySet
-            simplify_fn = lambda p: Region.PolySet.Simplify(p, epsilon)
+            import Region.Poly
+            simplify_fn = lambda p: Region.Poly.Simplify(p, epsilon)
         xmin = 0 if xmin is None else xmin
         xmax = self.Width() if xmax is None else xmax
         ymin = 0 if ymin is None else ymin
@@ -786,16 +888,62 @@ class World(object):
             self._progress(force=True)
         return results if multi else results[0]
 
+    def GetBiomes(self, biome_def, progress=None):
+        from Region.Density import DensityCalculator
+        calc = DensityCalculator(self.Width(), self.Height(),
+                                 biome_def.WindowSize())
+        for x, y, t in self.EachTile(rowcol=False, progress=progress):
+            v = biome_def.TileValue(t)
+            if v != 0:
+                calc.add_point(x, y, v)
+        # a point (x,y) is part of a biome if that point's value is no less
+        # than biome_def.Threshold(), akin to: (won't work, but it's the idea)
+        #   [point for point in calc if point.value >= biome_def.Threshold()]
+        biome_matrix = calc.get_matrix() >= biome_def.Threshold()
+
+        # clockwise tracing around points greater than the biome minimum
+        # should result in a crisp polygon edge, which can be simplified
+        # via the normal algorithm
+        # edge has matching biome on the right, non-matching on the left,
+        # so it's essentially an arrow
+        #
+        # state of scan: single point and an arrow leading towards the next
+        # single point (edge detection!!)
+
+    def Crimson(self):
+        "True if world is Crimson, False otherwise"
+        return bool(self.GetFlag('IsCrimson'))
+
+    def Corruption(self):
+        "True if world is not Crimson, False otherwise"
+        return not self.Crimson()
+
+    def GetSize(self):
+        "Returns one of World.SIZE_* constants, or World.SIZE_UNKNOWN"
+        size = (self.Width(), self.Height())
+        if size in (SIZE_SMALL, SIZE_MEDIUM, SIZE_LARGE):
+            return size
+        return SIZE_UNKNOWN
+
+    def Expert(self):
+        "True if world is in Expert Mode, False otherwise"
+        return bool(self.GetFlag('ExpertMode'))
+
+    def Title(self):
+        return self.GetFlag('Title')
+
     def GetTileCounts(self):
         return self._tile_counts
 
     def GetTileCount(self, tile):
+        "Number of occurrences of tile ID given"
         return self._tile_counts[tile]
 
     def GetWallCounts(self):
         return self._wall_counts
 
     def GetWallCount(self, wall):
+        "Number of occurrences of wall ID given"
         return self._wall_counts[wall]
 
 ListWorlds = World.ListWorlds

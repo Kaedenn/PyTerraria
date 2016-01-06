@@ -30,7 +30,7 @@ FILETYPE_WORLD = 1
 class WorldFileHeader(object):
     ExpectedMetaMagic = RELOGIC_MAGIC | (FILETYPE_WORLD << 56)
 
-    def __init__(self, version=0, magic=0, rev=0):
+    def __init__(self, version=CompatibleVersion, magic=0, rev=0):
         self.Version = version
         self.MetaMagic = magic
         self.MetaRevision = rev

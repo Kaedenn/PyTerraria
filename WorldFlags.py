@@ -125,9 +125,11 @@ class WorldFlags(object):
                                                   # requires manual parsing
     )
     def __init__(self, version):
+        self._version = version
         self.Title = ''      # ILString
-        for flag in WorldFlags.Flags:
-            setattr(self, flag[0], 0 if flag[1] is not None else [])
+        for flag, type, ver in WorldFlags.Flags:
+            value = 0 if type is not None else []
+            setattr(self, flag, value)
 
     def set(self, flag, value):
         setattr(self, flag, value)
