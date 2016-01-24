@@ -2,6 +2,13 @@
 
 import ctypes
 
+HAVE_SCIPY_WEAVE = False
+try:
+    import scipy.weave as weave
+    HAVE_SCIPY_WEAVE = True
+except ImportError as e:
+    HAVE_SCIPY_WEAVE = False
+
 import IDs
 
 # Is there another byte of metadata present?
@@ -239,8 +246,18 @@ class Tile(object):
         content = ", ".join(("%s=%r" % (a, getattr(self, a))) for a in attrs)
         return "Tile(%s)" % (content,)
 
+def FromStream_Weave(stream, importantTiles):
+    # 1) calculate number of bytes to read from stream
+    # 2) read those bytes
+    # 3) provide those bytes to code that parses the tile information
+    # 4) obtain packed tile information and RLE
+    # 5) construct a tile with the packed information
+    pass
+
 def FromStream(stream, importantTiles):
     "Returns (tile, rle) pair given a stream and the list of important tiles"
+    # TODO: Try scipy.weave () to make this faster; use inline C++ code
+    # with a sane fallback if weave isn't installed
     test = lambda val,mask: (val & mask) == mask
     t = Tile(lazy=True)     # profiled, does make a difference (36s -> 32s)
     rle = 0

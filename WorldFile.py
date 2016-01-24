@@ -436,6 +436,8 @@ def _main():
     i = p.add_argument_group("Image Arguments")
     i.add_argument("--png", action="store_true",
                    help="generate a minimap-style PNG (use --out)")
+    i.add_argument("--biomes", action="store_true",
+                   help="draw biome regions on the image")
     i.add_argument("--no-tiles", action="store_true",
                    help="do not output tiles; assume all tiles are inactive")
     i.add_argument("--no-walls", action="store_true",

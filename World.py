@@ -17,6 +17,13 @@ import sys
 import time
 from warnings import warn
 
+HAVE_NUMPY = False
+try:
+    import numpy as np
+    HAVE_NUMPY = True
+except ImportError as e:
+    HAVE_NUMPY = False
+
 import Header
 from WorldFlags import WorldFlags
 import BinaryString
@@ -72,15 +79,19 @@ WORLDPATH_LINUX = os.path.expanduser("~/.local/share/Terraria/Worlds")
 WORLDPATH_WINDOWS = None
 
 class BiomeDefinition(object):
-    def __init__(self, tile_contribute, min_size, win_size):
+    def __init__(self, name, tile_contribute, min_size, win_size):
         """
         tile_contribute:
             dictionaries of tile ID to number denoting the value of that
             particular tile, like ForestGrass->1, LihzahrdBrick->3 (or w/e)
         """
+        self._name = name
         self._tiles = tile_contribute
         self._min = min_size
         self._window = win_size
+
+    def Name(self):
+        return self._name
 
     def Threshold(self):
         return self._min
@@ -91,9 +102,16 @@ class BiomeDefinition(object):
     def TileValue(self, tile_obj):
         return self._tiles.get(tile_obj.Tile, 0)
 
+    # if this class needs to be used as a key,
+    #def __eq__(self, other):
+    #    return type(self) == type(other) and self._name == other._name
+
+    #def __hash__(self):
+    #    return hash(self._name)
+
 # Taken from Main.cs, Player.cs, and Lighting.cs from the decompiled Terraria
 # source code. Terraria uses 45 for the window size (Lighting.offScreenTiles)
-Zone_Corrupt = BiomeDefinition({
+Zone_Corrupt = BiomeDefinition("Corrupt", {
     IDs.Tile.CorruptGrass: 1,
     IDs.Tile.CorruptPlants: 1,
     IDs.Tile.Ebonstone: 1,
@@ -104,7 +122,7 @@ Zone_Corrupt = BiomeDefinition({
     IDs.Tile.CorruptHardenedSand: 1,
     IDs.Tile.Sunflower: -5
 }, 200, 45)
-Zone_Holy = BiomeDefinition({
+Zone_Holy = BiomeDefinition("Hallow", {
     IDs.Tile.HallowedGrass: 1,
     IDs.Tile.HallowedPlants: 1,
     IDs.Tile.HallowedPlants2: 1,
@@ -114,17 +132,17 @@ Zone_Holy = BiomeDefinition({
     IDs.Tile.HallowSandstone: 1,
     IDs.Tile.HallowHardenedSand: 1
 }, 100, 45)
-Zone_Meteor = BiomeDefinition({
+Zone_Meteor = BiomeDefinition("Meteor", {
     IDs.Tile.Meteorite: 1
 }, 50, 45)
-Zone_Jungle = BiomeDefinition({
+Zone_Jungle = BiomeDefinition("Jungle", {
     IDs.Tile.JungleGrass: 1,
     IDs.Tile.JunglePlants: 1,
     IDs.Tile.JungleVines: 1,
     IDs.Tile.JunglePlants2: 1,
     IDs.Tile.LihzahrdBrick: 1
 }, 80, 45)
-Zone_Snow = BiomeDefinition({
+Zone_Snow = BiomeDefinition("Snow", {
     IDs.Tile.SnowBlock: 1,
     IDs.Tile.SnowBrick: 1,
     IDs.Tile.IceBlock: 1,
@@ -133,7 +151,7 @@ Zone_Snow = BiomeDefinition({
     IDs.Tile.CorruptIce: 1,
     IDs.Tile.FleshIce: 1
 }, 300, 45)
-Zone_Crimson = BiomeDefinition({
+Zone_Crimson = BiomeDefinition("Crimson", {
     IDs.Tile.FleshGrass: 1,
     IDs.Tile.FleshIce: 1,
     IDs.Tile.Crimstone: 1,
@@ -143,7 +161,7 @@ Zone_Crimson = BiomeDefinition({
     IDs.Tile.CrimtaneThorns: 1,
     IDs.Tile.Sunflower: -5
 }, 200, 45)
-Zone_Desert = BiomeDefinition({
+Zone_Desert = BiomeDefinition("Desert", {
     IDs.Tile.Sand: 1,
     IDs.Tile.Ebonsand: 1,
     IDs.Tile.Pearlsand: 1,
@@ -157,13 +175,55 @@ Zone_Desert = BiomeDefinition({
     IDs.Tile.HallowSandstone: 1,
     IDs.Tile.CrimsonSandstone: 1
 }, 1000, 45)
-Zone_Glowshroom = BiomeDefinition({
+Zone_Glowshroom = BiomeDefinition("Glowing Mushroom", {
     IDs.Tile.MushroomGrass: 1,
     IDs.Tile.MushroomPlants: 1,
     IDs.Tile.MushroomTrees: 1
 }, 100, 45)
-Zone_WaterCandle = BiomeDefinition({IDs.Tile.WaterCandle: 1}, 1, 45)
-Zone_PeaceCandle = BiomeDefinition({IDs.Tile.PeaceCandle: 1}, 1, 45)
+Zone_WaterCandle = BiomeDefinition("Water Candle", {
+    IDs.Tile.WaterCandle: 1
+}, 1, 45)
+Zone_PeaceCandle = BiomeDefinition("Peace Candle", {
+    IDs.Tile.PeaceCandle: 1
+}, 1, 45)
+
+AllZones = (Zone_Corrupt, Zone_Holy, Zone_Meteor, Zone_Jungle, Zone_Snow,
+            Zone_Crimson, Zone_Desert, Zone_Glowshroom, Zone_WaterCandle,
+            Zone_PeaceCandle)
+
+class BiomeIdentifier(object):
+    def __init__(self, world, zones=AllZones, progress=None):
+        if not HAVE_NUMPY:
+            raise RuntimeError("Please install numpy")
+        self._world = world
+        self._zones = tuple(zones)
+        self._zone_map = dict((z.Name(), i) for i,z in enumerate(self._zones))
+        self._progress = progress
+        self._data = np.asmatrix(
+                np.zeros((world.Width(), world.Height()),
+                         dtype=[(z.Name(), '<i4') for z in self._zones]))
+        for x, y, t in self._world.EachTile(rowcol=False,
+                                            progress=self._progress):
+            for zone in self._zones:
+                v = zone.TileValue(t)
+                if v != 0:
+                    self._add_biome_point(x, y, zone, v)
+
+    def _add_biome_point(self, x, y, zone, value=1):
+        # add x, y, zone to a np.matrix set (with fuzz)
+        window = zone.WindowSize()
+        w, h = self._world.Width(), self._world.Height()
+        xmin = max(0, x - window)
+        xmax = min(w, x + window)
+        ymin = max(0, y - window)
+        ymax = min(h, y + window)
+        self._data[xmin:xmax, ymin:ymax][zone.Name()] += value
+
+    def GetBiomesAt(self, x, y, asdict=False):
+        if asdict:
+            return dict((z.Name(), self._data[x, y][z.Name()]) \
+                    for z in self._zones)
+        return tuple(self._data[x, y][z.Name()] for z in self._zones)
 
 def PolyMatch_Tile(tileid):
     """
@@ -900,6 +960,8 @@ class World(object):
         # than biome_def.Threshold(), akin to: (won't work, but it's the idea)
         #   [point for point in calc if point.value >= biome_def.Threshold()]
         biome_matrix = calc.get_matrix() >= biome_def.Threshold()
+        # until edge->poly detection is implemented, end here
+        return biome_matrix
 
         # clockwise tracing around points greater than the biome minimum
         # should result in a crisp polygon edge, which can be simplified
